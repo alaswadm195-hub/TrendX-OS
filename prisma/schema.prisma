@@ -1,0 +1,152 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  EMPLOYEE
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(EMPLOYEE)
+
+  employee     Employee?
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Employee {
+  id          String   @id @default(cuid())
+
+  userId      String   @unique
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  phone       String?
+  position    String?
+  salary      Float?
+
+  appointments Appointment[]
+  tasks        Task[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Client {
+  id           String   @id @default(cuid())
+
+  name         String
+  phone        String?
+  email        String?
+  company      String?
+
+  notes        String?
+
+  subscriptions Subscription[]
+  appointments  Appointment[]
+  tasks         Task[]
+  transactions  Transaction[]
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Subscription {
+  id          String @id @default(cuid())
+
+  clientId    String
+  client      Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  planName    String
+  price       Float
+
+  startDate   DateTime
+  endDate     DateTime
+
+  status      SubscriptionStatus @default(ACTIVE)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Appointment {
+  id          String @id @default(cuid())
+
+  title       String
+
+  clientId    String
+  client      Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  employeeId  String?
+  employee    Employee? @relation(fields: [employeeId], references: [id])
+
+  appointmentDate DateTime
+
+  status      AppointmentStatus @default(PENDING)
+
+  notes       String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Task {
+  id          String @id @default(cuid())
+
+  title       String
+  description String?
+
+  clientId    String?
+  client      Client? @relation(fields: [clientId], references: [id])
+
+  employeeId  String?
+  employee    Employee? @relation(fields: [employeeId], references: [id])
+
+  dueDate     DateTime?
+
+  status      TaskStatus @default(TODO)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Transaction {
+  id          String @id @default(cuid())
+
+  clientId    String
+  client      Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  amount      Float
+  description String?
+
+  createdAt   DateTime @default(now())
+}
