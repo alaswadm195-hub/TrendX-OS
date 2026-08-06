@@ -6,17 +6,19 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "reset-db": "tsx scripts/reset-database.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@hookform/resolvers": "^5.4.0",
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.9.1",
-    "axios": "^1.18.1",
+    "axios": "^1.19.0",
     "bcryptjs": "^3.0.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "dotenv": "^17.4.2",
     "jose": "^6.2.6",
     "lucide-react": "^1.26.0",
     "next": "16.2.11",
@@ -26,6 +28,7 @@
     "react-dom": "19.2.4",
     "react-hook-form": "^7.82.0",
     "recharts": "^3.10.1",
+    "resend": "^6.18.1",
     "shadcn": "^4.14.1",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
@@ -41,6 +44,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.11",
     "tailwindcss": "^4",
+    "tsx": "^4.23.9",
     "typescript": "^5"
   }
 }

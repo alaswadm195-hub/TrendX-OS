@@ -26,7 +26,7 @@ export async function POST(req: Request) {
 
     if (!user) {
       return NextResponse.json(
-        { message: "Invalid credentials" },
+        { message: "User not found" },
         { status: 401 }
       );
     }
@@ -38,7 +38,7 @@ export async function POST(req: Request) {
 
     if (!validPassword) {
       return NextResponse.json(
-        { message: "Invalid credentials" },
+        { message: "Wrong password" },
         { status: 401 }
       );
     }
@@ -63,7 +63,7 @@ export async function POST(req: Request) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24 * 7,
+     
     });
 
     return response;

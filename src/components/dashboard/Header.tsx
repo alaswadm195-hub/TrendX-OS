@@ -1,11 +1,20 @@
 "use client";
 
-import { Bell, Search, Menu, LogOut } from "lucide-react";
+import {
+  Bell,
+  Search,
+  Menu,
+  LogOut,
+} from "lucide-react";
 
 export default function Header({
   onMenuClick,
+  userName = "المستخدم",
+  role = "EMPLOYEE",
 }: {
   onMenuClick: () => void;
+  userName?: string;
+  role?: string;
 }) {
   const handleLogout = async () => {
     try {
@@ -13,7 +22,8 @@ export default function Header({
         method: "POST",
       });
 
-      window.location.href = "/login";
+      window.location.href =
+        "/login";
     } catch (error) {
       console.error(error);
     }
@@ -21,7 +31,6 @@ export default function Header({
 
   return (
     <header className="h-20 bg-white border-b border-slate-200 px-4 md:px-6 lg:px-8 flex items-center justify-between">
-      {/* Right Section */}
       <div className="flex items-center gap-3">
         <button
           onClick={onMenuClick}
@@ -44,9 +53,7 @@ export default function Header({
         </div>
       </div>
 
-      {/* Left Section */}
       <div className="flex items-center gap-4">
-        {/* Notifications */}
         <button className="relative w-11 h-11 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center transition">
           <Bell size={18} />
 
@@ -55,7 +62,6 @@ export default function Header({
           </span>
         </button>
 
-        {/* Logout */}
         <button
           onClick={handleLogout}
           className="w-11 h-11 rounded-xl border border-red-200 text-red-600 hover:bg-red-50 flex items-center justify-center transition"
@@ -64,20 +70,21 @@ export default function Header({
           <LogOut size={18} />
         </button>
 
-        {/* User */}
         <div className="hidden sm:flex items-center gap-3">
           <div className="text-right">
             <p className="font-semibold text-sm">
-              أحمد محمد
+              {userName}
             </p>
 
             <p className="text-xs text-slate-500">
-              مدير النظام
+              {role === "ADMIN"
+                ? "مدير النظام"
+                : "موظف"}
             </p>
           </div>
 
           <div className="w-11 h-11 rounded-xl bg-blue-600 text-white flex items-center justify-center font-bold">
-            أ
+            {userName.charAt(0)}
           </div>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { verifyToken } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 export async function getCurrentUser() {
   try {
@@ -13,9 +14,25 @@ export async function getCurrentUser() {
 
     const payload = await verifyToken(token);
 
+    const user = await prisma.user.findUnique({
+      where: {
+        id: payload.userId as string,
+      },
+      include: {
+        employee: true,
+      },
+    });
+
+    if (!user) {
+      return null;
+    }
+
     return {
-      userId: payload.userId as string,
-      role: payload.role as string,
+      userId: user.id,
+      role: user.role,
+      employeeId: user.employee?.id || null,
+      name: user.name,
+      email: user.email,
     };
   } catch {
     return null;

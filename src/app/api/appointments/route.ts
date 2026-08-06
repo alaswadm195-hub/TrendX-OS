@@ -13,18 +13,26 @@ export async function GET() {
       );
     }
 
-    const clients = await prisma.client.findMany({
+    const appointments = await prisma.appointment.findMany({
+      include: {
+        client: true,
+        employee: {
+          include: {
+            user: true,
+          },
+        },
+      },
       orderBy: {
-        createdAt: "desc",
+        appointmentDate: "asc",
       },
     });
 
-    return NextResponse.json(clients);
+    return NextResponse.json(appointments);
   } catch (error) {
     console.error(error);
 
     return NextResponse.json(
-      { message: "Server Error" },
+      { error: "Failed to fetch appointments" },
       { status: 500 }
     );
   }
@@ -50,22 +58,37 @@ export async function POST(req: Request) {
 
     const body = await req.json();
 
-    const client = await prisma.client.create({
+    const appointment = await prisma.appointment.create({
       data: {
-        name: body.name,
-        phone: body.phone || null,
-        email: body.email || null,
-        company: body.company || null,
+        title: body.title,
+        clientId: body.clientId,
+        employeeId: body.employeeId || null,
+        customerName: body.customerName || null,
+        customerPhone: body.customerPhone || null,
+        appointmentDate: new Date(body.appointmentDate),
+        endDate: body.endDate
+          ? new Date(body.endDate)
+          : null,
+        location: body.location || null,
+        meetingLink: body.meetingLink || null,
         notes: body.notes || null,
+      },
+      include: {
+        client: true,
+        employee: {
+          include: {
+            user: true,
+          },
+        },
       },
     });
 
-    return NextResponse.json(client);
+    return NextResponse.json(appointment);
   } catch (error) {
     console.error(error);
 
     return NextResponse.json(
-      { message: "Server Error" },
+      { error: "Failed to create appointment" },
       { status: 500 }
     );
   }
