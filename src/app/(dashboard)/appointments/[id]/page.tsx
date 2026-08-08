@@ -56,13 +56,23 @@ export default async function AppointmentDetailsPage({
   </div>
 
   <AppointmentActions
-    appointmentId={
-      appointment.id
-    }
-    status={
-      appointment.status
-    }
-  />
+  appointment={{
+    id: appointment.id,
+    title: appointment.title,
+    clientId: appointment.clientId,
+    employeeId: appointment.employeeId,
+    customerName: appointment.customerName,
+    customerPhone: appointment.customerPhone,
+    appointmentDate:
+      appointment.appointmentDate.toISOString(),
+    endDate:
+      appointment.endDate?.toISOString() || null,
+    location: appointment.location,
+    meetingLink: appointment.meetingLink,
+    notes: appointment.notes,
+    status: appointment.status,
+  }}
+/>
 </div>
 
       <div className="bg-white border rounded-2xl p-6">

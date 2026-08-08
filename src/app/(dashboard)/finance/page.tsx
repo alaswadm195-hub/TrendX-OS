@@ -5,20 +5,32 @@ import AddExpenseModal from "@/components/finance/AddExpenseModal";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/current-user";
 
-export default async function FinancePage() {
-  const currentUser =
-    await getCurrentUser();
+type FinancePageProps = {
+  searchParams: Promise<{
+    invoiceStatus?: string;
+  }>;
+};
+
+export default async function FinancePage({
+  searchParams,
+}: FinancePageProps) {
+  const currentUser = await getCurrentUser();
 
   if (!currentUser) {
     redirect("/login");
   }
 
-  if (
-    currentUser.role !==
-    "ADMIN"
-  ) {
+  if (currentUser.role !== "ADMIN") {
     redirect("/tasks");
   }
+
+  const params = await searchParams;
+
+  const invoiceStatus =
+    params.invoiceStatus === "PAID" ||
+    params.invoiceStatus === "OPEN"
+      ? params.invoiceStatus
+      : "ALL";
 
   const invoices =
     await prisma.invoice.findMany({
@@ -34,30 +46,31 @@ export default async function FinancePage() {
       },
     });
 
+  /*
+   * الإحصائيات العامة
+   * تظل محسوبة على كل الفواتير
+   */
   const totalInvoices =
     invoices.length;
 
   const totalSales =
     invoices.reduce(
       (sum, invoice) =>
-        sum +
-        invoice.totalAmount,
+        sum + invoice.totalAmount,
       0
     );
 
   const totalPaid =
     invoices.reduce(
       (sum, invoice) =>
-        sum +
-        invoice.paidAmount,
+        sum + invoice.paidAmount,
       0
     );
 
   const totalRemaining =
     invoices.reduce(
       (sum, invoice) =>
-        sum +
-        invoice.remainingAmount,
+        sum + invoice.remainingAmount,
       0
     );
 
@@ -75,12 +88,28 @@ export default async function FinancePage() {
   const openInvoices =
     invoices.filter(
       (invoice) =>
-        invoice.status !==
-        "PAID"
+        invoice.status !== "PAID"
     ).length;
+
+  /*
+   * الفواتير المعروضة في الجدول
+   */
+  const filteredInvoices =
+    invoiceStatus === "PAID"
+      ? invoices.filter(
+          (invoice) =>
+            invoice.status === "PAID"
+        )
+      : invoiceStatus === "OPEN"
+        ? invoices.filter(
+            (invoice) =>
+              invoice.status !== "PAID"
+          )
+        : invoices;
 
   return (
     <div className="p-6 lg:p-8">
+      {/* Header */}
       <div className="flex flex-wrap gap-3 items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold">
@@ -95,10 +124,12 @@ export default async function FinancePage() {
 
         <div className="flex gap-3">
           <AddExpenseModal />
+
           <AddInvoiceModal />
         </div>
       </div>
 
+      {/* Statistics */}
       <div className="grid md:grid-cols-5 gap-6 mb-8">
         <div className="bg-white rounded-2xl border p-6">
           <p className="text-slate-500">
@@ -151,18 +182,78 @@ export default async function FinancePage() {
         </div>
       </div>
 
+      {/* Invoices */}
       <div className="bg-white rounded-2xl border overflow-hidden mb-8">
+        {/* Invoices Header */}
         <div className="p-6 border-b">
-          <h2 className="text-xl font-bold">
-            الفواتير
-          </h2>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <h2 className="text-xl font-bold">
+              الفواتير
+            </h2>
+
+            {/* Filters */}
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/finance"
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                  invoiceStatus === "ALL"
+                    ? "bg-blue-600 text-white"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                }`}
+              >
+                كل الفواتير
+              </Link>
+
+              <Link
+                href="/finance?invoiceStatus=PAID"
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                  invoiceStatus === "PAID"
+                    ? "bg-green-600 text-white"
+                    : "bg-green-50 text-green-700 hover:bg-green-100"
+                }`}
+              >
+                الفواتير المدفوعة
+              </Link>
+
+              <Link
+                href="/finance?invoiceStatus=OPEN"
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                  invoiceStatus === "OPEN"
+                    ? "bg-orange-500 text-white"
+                    : "bg-orange-50 text-orange-700 hover:bg-orange-100"
+                }`}
+              >
+                الفواتير غير المكتملة
+              </Link>
+            </div>
+          </div>
         </div>
 
-        {invoices.length ===
-        0 ? (
+        {/* Current Filter */}
+        <div className="px-6 py-3 bg-slate-50 border-b text-sm text-slate-500">
+          {invoiceStatus === "PAID" && (
+            <span>
+              عرض الفواتير المدفوعة بالكامل
+            </span>
+          )}
+
+          {invoiceStatus === "OPEN" && (
+            <span>
+              عرض الفواتير التي لم يكتمل سدادها
+            </span>
+          )}
+
+          {invoiceStatus === "ALL" && (
+            <span>
+              عرض جميع الفواتير
+            </span>
+          )}
+        </div>
+
+        {/* Empty State */}
+        {filteredInvoices.length === 0 ? (
           <div className="text-center py-12 text-slate-500">
-            لا توجد فواتير حتى
-            الآن
+            لا توجد فواتير في هذا التصنيف
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -196,12 +287,10 @@ export default async function FinancePage() {
               </thead>
 
               <tbody>
-                {invoices.map(
+                {filteredInvoices.map(
                   (invoice) => (
                     <tr
-                      key={
-                        invoice.id
-                      }
+                      key={invoice.id}
                       className="border-b hover:bg-slate-50"
                     >
                       <td className="p-4">
@@ -219,31 +308,20 @@ export default async function FinancePage() {
                           href={`/finance/invoices/${invoice.id}`}
                           className="hover:underline"
                         >
-                          {
-                            invoice.title
-                          }
+                          {invoice.title}
                         </Link>
                       </td>
 
                       <td className="p-4">
-                        {
-                          invoice.totalAmount
-                        }{" "}
-                        ج
+                        {invoice.totalAmount} ج
                       </td>
 
                       <td className="p-4 text-green-600">
-                        {
-                          invoice.paidAmount
-                        }{" "}
-                        ج
+                        {invoice.paidAmount} ج
                       </td>
 
                       <td className="p-4 text-orange-500">
-                        {
-                          invoice.remainingAmount
-                        }{" "}
-                        ج
+                        {invoice.remainingAmount} ج
                       </td>
 
                       <td className="p-4">
@@ -256,13 +334,11 @@ export default async function FinancePage() {
                           ) : invoice.status ===
                             "PARTIAL" ? (
                             <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-sm">
-                              مدفوعة
-                              جزئياً
+                              مدفوعة جزئياً
                             </span>
                           ) : (
                             <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-sm">
-                              غير
-                              مدفوعة
+                              غير مدفوعة
                             </span>
                           )}
 
@@ -283,6 +359,7 @@ export default async function FinancePage() {
         )}
       </div>
 
+      {/* Expenses */}
       <div className="bg-white rounded-2xl border overflow-hidden">
         <div className="p-6 border-b">
           <h2 className="text-xl font-bold">
@@ -290,8 +367,7 @@ export default async function FinancePage() {
           </h2>
         </div>
 
-        {expenses.length ===
-        0 ? (
+        {expenses.length === 0 ? (
           <div className="text-center py-12 text-slate-500">
             لا توجد مصروفات
           </div>
@@ -318,27 +394,19 @@ export default async function FinancePage() {
                 {expenses.map(
                   (expense) => (
                     <tr
-                      key={
-                        expense.id
-                      }
+                      key={expense.id}
                       className="border-b"
                     >
                       <td className="p-4">
-                        {
-                          expense.title
-                        }
+                        {expense.title}
                       </td>
 
                       <td className="p-4 text-red-600">
-                        {
-                          expense.amount
-                        }{" "}
-                        ج
+                        {expense.amount} ج
                       </td>
 
                       <td className="p-4">
-                        {expense.notes ||
-                          "-"}
+                        {expense.notes || "-"}
                       </td>
                     </tr>
                   )
@@ -349,10 +417,10 @@ export default async function FinancePage() {
         )}
       </div>
 
+      {/* Open Invoices */}
       <div className="mt-6 bg-blue-50 border border-blue-200 rounded-2xl p-6">
         <p className="text-sm text-slate-500 mb-2">
-          الفواتير
-          المفتوحة
+          الفواتير المفتوحة
         </p>
 
         <h3 className="text-3xl font-bold text-blue-700">

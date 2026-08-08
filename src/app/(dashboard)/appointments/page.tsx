@@ -41,27 +41,24 @@ export default async function AppointmentsPage() {
   const pendingAppointments =
     appointments.filter(
       (appointment) =>
-        appointment.status ===
-        "PENDING"
+        appointment.status === "PENDING"
     ).length;
 
   const confirmedAppointments =
     appointments.filter(
       (appointment) =>
-        appointment.status ===
-        "CONFIRMED"
+        appointment.status === "CONFIRMED"
     ).length;
 
   const completedAppointments =
     appointments.filter(
       (appointment) =>
-        appointment.status ===
-        "COMPLETED"
+        appointment.status === "COMPLETED"
     ).length;
 
   return (
-    <div className="p-6 lg:p-8">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
+    <div className="p-6">
+      <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold">
             المواعيد
@@ -75,6 +72,10 @@ export default async function AppointmentsPage() {
         <AddAppointmentModal
           employees={employees}
           clients={clients}
+          whatsappNotificationPhone={
+            process.env.WHATSAPP_NOTIFICATION_PHONE ||
+            ""
+          }
         />
       </div>
 

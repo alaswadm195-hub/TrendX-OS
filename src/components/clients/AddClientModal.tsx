@@ -12,12 +12,11 @@ export default function AddClientModal() {
   const [form, setForm] = useState({
     name: "",
     phone: "",
-    email: "",
-    company: "",
     notes: "",
   });
 
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] =
+    useState(false);
 
   async function handleSubmit(
     e: React.FormEvent
@@ -29,21 +28,37 @@ export default function AddClientModal() {
       return;
     }
 
+    if (!form.phone.trim()) {
+      alert("رقم الهاتف مطلوب");
+      return;
+    }
+
     try {
       setLoading(true);
 
-      const res = await fetch("/api/clients", {
-        method: "POST",
-        headers: {
-          "Content-Type":
-            "application/json",
-        },
-        body: JSON.stringify(form),
-      });
+      const res = await fetch(
+        "/api/clients",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            name: form.name.trim(),
+            phone: form.phone.trim(),
+            notes:
+              form.notes.trim() || null,
+          }),
+        }
+      );
+
+      const data = await res.json();
 
       if (!res.ok) {
         throw new Error(
-          "Failed to create client"
+          data.error ||
+            "Failed to create client"
         );
       }
 
@@ -52,8 +67,6 @@ export default function AddClientModal() {
       setForm({
         name: "",
         phone: "",
-        email: "",
-        company: "",
         notes: "",
       });
 
@@ -61,7 +74,11 @@ export default function AddClientModal() {
     } catch (error) {
       console.error(error);
 
-      alert("حدث خطأ أثناء الإضافة");
+      alert(
+        error instanceof Error
+          ? error.message
+          : "حدث خطأ أثناء الإضافة"
+      );
     } finally {
       setLoading(false);
     }
@@ -73,7 +90,7 @@ export default function AddClientModal() {
         onClick={() => setOpen(true)}
         className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl font-medium transition"
       >
-        <Plus size={18} />
+        <Plus size={20} />
         إضافة عميل
       </button>
 
@@ -86,9 +103,11 @@ export default function AddClientModal() {
               </h2>
 
               <button
+                type="button"
                 onClick={() =>
                   setOpen(false)
                 }
+                className="text-slate-500 hover:text-slate-800"
               >
                 <X size={22} />
               </button>
@@ -98,70 +117,70 @@ export default function AddClientModal() {
               onSubmit={handleSubmit}
               className="space-y-4"
             >
-              <input
-                placeholder="اسم العميل"
-                value={form.name}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    name: e.target.value,
-                  })
-                }
-                className="w-full border rounded-xl p-3"
-              />
+              {/* اسم العميل */}
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  اسم العميل
+                </label>
 
-              <input
-                placeholder="رقم الهاتف"
-                value={form.phone}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    phone: e.target.value,
-                  })
-                }
-                className="w-full border rounded-xl p-3"
-              />
+                <input
+                  required
+                  placeholder="اسم العميل"
+                  value={form.name}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      name: e.target.value,
+                    })
+                  }
+                  className="w-full border rounded-xl p-3"
+                />
+              </div>
 
-              <input
-                placeholder="البريد الإلكتروني"
-                value={form.email}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    email: e.target.value,
-                  })
-                }
-                className="w-full border rounded-xl p-3"
-              />
+              {/* رقم الهاتف */}
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  رقم الهاتف
+                </label>
 
-              <input
-                placeholder="الشركة"
-                value={form.company}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    company: e.target.value,
-                  })
-                }
-                className="w-full border rounded-xl p-3"
-              />
+                <input
+                  required
+                  type="tel"
+                  placeholder="رقم الهاتف"
+                  value={form.phone}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      phone: e.target.value,
+                    })
+                  }
+                  className="w-full border rounded-xl p-3"
+                />
+              </div>
 
-              <textarea
-                placeholder="ملاحظات"
-                value={form.notes}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    notes: e.target.value,
-                  })
-                }
-                className="w-full border rounded-xl p-3 h-28"
-              />
+              {/* الملاحظات */}
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  ملاحظات
+                </label>
+
+                <textarea
+                  placeholder="ملاحظات عن العميل"
+                  value={form.notes}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      notes: e.target.value,
+                    })
+                  }
+                  className="w-full border rounded-xl p-3 h-28"
+                />
+              </div>
 
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl py-3"
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl py-3"
               >
                 {loading
                   ? "جارٍ الحفظ..."
