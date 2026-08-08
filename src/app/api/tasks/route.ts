@@ -6,8 +6,7 @@ import { sendWhatsAppMessage } from "@/lib/whatsapp";
 
 export async function GET() {
   try {
-    const currentUser =
-      await getCurrentUser();
+    const currentUser = await getCurrentUser();
 
     if (!currentUser) {
       return NextResponse.json(
@@ -20,31 +19,28 @@ export async function GET() {
       );
     }
 
-    const tasks =
-      await prisma.task.findMany({
-        where:
-          currentUser.role ===
-          "ADMIN"
-            ? {}
-            : {
-                employeeId:
-                  currentUser.employeeId!,
-              },
-
-        include: {
-          employee: {
-            include: {
-              user: true,
+    const tasks = await prisma.task.findMany({
+      where:
+        currentUser.role === "ADMIN"
+          ? {}
+          : {
+              employeeId: currentUser.employeeId!,
             },
-          },
-          client: true,
-          activities: true,
-        },
 
-        orderBy: {
-          createdAt: "desc",
+      include: {
+        employee: {
+          include: {
+            user: true,
+          },
         },
-      });
+        client: true,
+        activities: true,
+      },
+
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
 
     return NextResponse.json(tasks);
   } catch (error) {
@@ -61,12 +57,9 @@ export async function GET() {
   }
 }
 
-export async function POST(
-  req: Request
-) {
+export async function POST(req: Request) {
   try {
-    const currentUser =
-      await getCurrentUser();
+    const currentUser = await getCurrentUser();
 
     if (!currentUser) {
       return NextResponse.json(
@@ -79,14 +72,10 @@ export async function POST(
       );
     }
 
-    if (
-      currentUser.role !==
-      "ADMIN"
-    ) {
+    if (currentUser.role !== "ADMIN") {
       return NextResponse.json(
         {
-          error:
-            "Only admins can create tasks",
+          error: "Only admins can create tasks",
         },
         {
           status: 403,
@@ -121,8 +110,7 @@ export async function POST(
     if (!body.employeeId) {
       return NextResponse.json(
         {
-          error:
-            "Employee is required",
+          error: "Employee is required",
         },
         {
           status: 400,
@@ -133,8 +121,7 @@ export async function POST(
     if (!body.dueDate) {
       return NextResponse.json(
         {
-          error:
-            "Due date is required",
+          error: "Due date is required",
         },
         {
           status: 400,
@@ -142,67 +129,83 @@ export async function POST(
       );
     }
 
-    const task =
-      await prisma.task.create({
-        data: {
-          title: body.title,
-          description:
-            body.description ||
-            null,
-          clientId:
-            body.clientId,
-          employeeId:
-            body.employeeId,
-          dueDate: new Date(
-            body.dueDate
-          ),
-          fileUrl:
-            body.fileUrl || null,
-          priority:
-            body.priority ||
-            "ON_TIME",
-          status: "TODO",
-        },
+    const task = await prisma.task.create({
+      data: {
+        title: body.title,
 
-        include: {
-          employee: {
-            include: {
-              user: true,
-            },
+        description:
+          body.description || null,
+
+        clientId:
+          body.clientId,
+
+        employeeId:
+          body.employeeId,
+
+        dueDate: new Date(
+          body.dueDate
+        ),
+
+        fileUrl:
+          body.fileUrl || null,
+
+        priority:
+          body.priority || "ON_TIME",
+
+        status: "TODO",
+      },
+
+      include: {
+        employee: {
+          include: {
+            user: true,
           },
-
-          client: true,
         },
-      });
 
-    await prisma.taskActivity.create(
-      {
-        data: {
-          taskId: task.id,
-          action: `تم إنشاء المهمة وإسنادها إلى ${task.employee.user.name}`,
-        },
-      }
-    );
+        client: true,
+      },
+    });
+
+    /*
+     * تسجيل إنشاء المهمة
+     */
+
+    await prisma.taskActivity.create({
+      data: {
+        taskId: task.id,
+
+        action: `تم إنشاء المهمة وإسنادها إلى ${task.employee.user.name}`,
+      },
+    });
+
+    /*
+     * إرسال Email للموظف
+     */
 
     try {
       await sendTaskEmail({
-        to: task.employee.user
-          .email,
+        to: task.employee.user.email,
 
         employeeName:
           task.employee.user.name,
 
-        taskTitle: task.title,
+        taskTitle:
+          task.title,
 
         clientName:
           task.client.name,
 
-        dueDate: new Date(
-          task.dueDate
-        ).toLocaleDateString(
-          "ar-EG"
-        ),
+        dueDate:
+          new Date(
+            task.dueDate
+          ).toLocaleDateString(
+            "ar-EG"
+          ),
       });
+
+      console.log(
+        `📧 Task email sent to ${task.employee.user.email}`
+      );
     } catch (emailError) {
       console.error(
         "Email Error:",
@@ -210,45 +213,67 @@ export async function POST(
       );
     }
 
+    /*
+     * إرسال WhatsApp للموظف
+     */
+
     try {
-      if (
-        task.employee.phone
-      ) {
+      if (task.employee.phone) {
         await sendWhatsAppMessage({
           to: task.employee.phone,
 
-          message: `🔥 مهمة جديدة
+          message: `🔥 مهمة جديدة من TrendX OS
 
-الاسم: ${task.employee.user.name}
+👤 الموظف:
+${task.employee.user.name}
 
-المهمة:
+📌 المهمة:
 ${task.title}
 
-العميل:
+👥 العميل:
 ${task.client.name}
 
-برجاء مراجعة TrendX OS.`,
+📅 موعد التسليم:
+${new Date(
+  task.dueDate
+).toLocaleDateString("ar-EG")}
+
+⚡ الأولوية:
+${
+  task.priority === "URGENT"
+    ? "مستعجلة 🔥"
+    : "تسليم في موعدها"
+}
+
+يرجى الدخول إلى TrendX OS لمراجعة تفاصيل المهمة.`,
         });
+
+        console.log(
+          `📱 WhatsApp task notification sent to ${task.employee.phone}`
+        );
+      } else {
+        console.log(
+          "⚠️ Employee has no phone number"
+        );
       }
-    } catch (
-      whatsappError
-    ) {
+    } catch (whatsappError) {
       console.error(
         "WhatsApp Error:",
         whatsappError
       );
     }
 
-    return NextResponse.json(
-      task
-    );
+    /*
+     * إرجاع المهمة
+     */
+
+    return NextResponse.json(task);
   } catch (error) {
     console.error(error);
 
     return NextResponse.json(
       {
-        error:
-          "Failed to create task",
+        error: "Failed to create task",
       },
       {
         status: 500,

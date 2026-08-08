@@ -8,8 +8,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const currentUser =
-      await getCurrentUser();
+    const currentUser = await getCurrentUser();
 
     if (!currentUser) {
       return NextResponse.json(
@@ -50,12 +49,14 @@ export async function PATCH(
       );
     }
 
-    // الموظف لا يمكنه التعامل إلا مع مهامه فقط
+    /*
+     * الموظف لا يستطيع التعامل
+     * إلا مع المهام المسندة إليه
+     */
+
     if (
-      currentUser.role ===
-        "EMPLOYEE" &&
-      task.employeeId !==
-        currentUser.employeeId
+      currentUser.role === "EMPLOYEE" &&
+      task.employeeId !== currentUser.employeeId
     ) {
       return NextResponse.json(
         {
@@ -67,21 +68,19 @@ export async function PATCH(
       );
     }
 
-    // الموظف مسموح له فقط ببدء المهمة أو إرسالها للمراجعة
-    if (
-      currentUser.role ===
-      "EMPLOYEE"
-    ) {
+    /*
+     * الموظف مسموح له فقط:
+     * START
+     * SUBMIT_REVIEW
+     */
+
+    if (currentUser.role === "EMPLOYEE") {
       const allowedActions = [
         "START",
         "SUBMIT_REVIEW",
       ];
 
-      if (
-        !allowedActions.includes(
-          body.action
-        )
-      ) {
+      if (!allowedActions.includes(body.action)) {
         return NextResponse.json(
           {
             error:
@@ -94,13 +93,15 @@ export async function PATCH(
       }
     }
 
-    // الأدمن فقط يعتمد أو يرجع المهمة
+    /*
+     * الأدمن فقط:
+     * APPROVE
+     * RETURN
+     */
+
     if (
-      ["APPROVE", "RETURN"].includes(
-        body.action
-      ) &&
-      currentUser.role !==
-        "ADMIN"
+      ["APPROVE", "RETURN"].includes(body.action) &&
+      currentUser.role !== "ADMIN"
     ) {
       return NextResponse.json(
         {
@@ -113,92 +114,248 @@ export async function PATCH(
       );
     }
 
+    /*
+     * أرقام WhatsApp
+     *
+     * رقم الشركة هو الحساب المتصل بخدمة WhatsApp.
+     *
+     * ADMIN_WHATSAPP_NUMBER:
+     * الرقم الذي يستقبل إشعارات الموظفين.
+     *
+     * employee.phone:
+     * رقم الموظف الذي يستقبل إشعارات
+     * الاعتماد أو الإرجاع.
+     */
+
+    const adminWhatsApp =
+      process.env.ADMIN_WHATSAPP_NUMBER || "";
+
     let newStatus = task.status;
+
     let activity = "";
+
     let whatsappMessage = "";
+
     let whatsappReceiver = "";
 
+    /*
+     * =========================
+     * START
+     * =========================
+     *
+     * الموظف بدأ تنفيذ المهمة
+     *
+     * الرسالة:
+     * رقم الشركة → الأدمن
+     */
+
     switch (body.action) {
-      case "START":
+      case "START": {
+        if (task.status !== "TODO") {
+          return NextResponse.json(
+            {
+              error:
+                "Task cannot be started from its current status",
+            },
+            {
+              status: 400,
+            }
+          );
+        }
+
         newStatus = "IN_PROGRESS";
 
-        activity = `${task.employee.user.name} بدأ تنفيذ المهمة`;
+        activity =
+          `${task.employee.user.name} بدأ تنفيذ المهمة`;
 
-        whatsappReceiver =
-          process.env.ADMIN_WHATSAPP ||
-          "";
+        whatsappReceiver = adminWhatsApp;
 
-        whatsappMessage = `🚀 بدء تنفيذ مهمة
+        whatsappMessage = `🚀 بدأ تنفيذ مهمة
 
-الموظف: ${task.employee.user.name}
+👤 الموظف:
+${task.employee.user.name}
 
-المهمة:
-${task.title}`;
+📌 المهمة:
+${task.title}
+
+👥 العميل:
+${task.client.name}
+
+📅 موعد التسليم:
+${new Date(
+  task.dueDate
+).toLocaleDateString("ar-EG")}
+
+بدأ الموظف تنفيذ المهمة الآن.
+
+TrendX OS`;
 
         break;
+      }
 
-      case "SUBMIT_REVIEW":
+      /*
+       * =========================
+       * SUBMIT REVIEW
+       * =========================
+       *
+       * الموظف سلّم المهمة للمراجعة
+       *
+       * الرسالة:
+       * رقم الشركة → الأدمن
+       */
+
+      case "SUBMIT_REVIEW": {
+        if (task.status !== "IN_PROGRESS") {
+          return NextResponse.json(
+            {
+              error:
+                "Task must be in progress before submitting for review",
+            },
+            {
+              status: 400,
+            }
+          );
+        }
+
         newStatus = "REVIEW";
 
-        activity = `${task.employee.user.name} أرسل المهمة للمراجعة`;
+        activity =
+          `${task.employee.user.name} أرسل المهمة للمراجعة`;
 
-        whatsappReceiver =
-          process.env.ADMIN_WHATSAPP ||
-          "";
+        whatsappReceiver = adminWhatsApp;
 
         whatsappMessage = `📤 مهمة جاهزة للمراجعة
 
-الموظف: ${task.employee.user.name}
+👤 الموظف:
+${task.employee.user.name}
 
-المهمة:
-${task.title}`;
+📌 المهمة:
+${task.title}
+
+👥 العميل:
+${task.client.name}
+
+📅 موعد التسليم:
+${new Date(
+  task.dueDate
+).toLocaleDateString("ar-EG")}
+
+تم تسليم المهمة للمراجعة.
+
+يرجى الدخول إلى TrendX OS لمراجعة المهمة.
+
+TrendX OS`;
 
         break;
+      }
 
-      case "APPROVE":
+      /*
+       * =========================
+       * APPROVE
+       * =========================
+       *
+       * الأدمن اعتمد المهمة
+       *
+       * الرسالة:
+       * رقم الشركة → الموظف
+       */
+
+      case "APPROVE": {
+        if (task.status !== "REVIEW") {
+          return NextResponse.json(
+            {
+              error:
+                "Task must be under review before approval",
+            },
+            {
+              status: 400,
+            }
+          );
+        }
+
         newStatus = "DONE";
 
-        activity =
-          "تم اعتماد المهمة";
+        activity = "تم اعتماد المهمة";
 
         whatsappReceiver =
-          task.employee.phone ||
-          "";
+          task.employee.phone || "";
 
         whatsappMessage = `✅ تم اعتماد المهمة
 
-المهمة:
+👤 الموظف:
+${task.employee.user.name}
+
+📌 المهمة:
 ${task.title}
 
-أحسنت 🎉`;
+👥 العميل:
+${task.client.name}
+
+تمت مراجعة المهمة واعتمادها بنجاح.
+
+أحسنت 🎉
+
+TrendX OS`;
 
         break;
+      }
 
-      case "RETURN":
-        newStatus =
-          "IN_PROGRESS";
+      /*
+       * =========================
+       * RETURN
+       * =========================
+       *
+       * الأدمن رجّع المهمة للتعديل
+       *
+       * الرسالة:
+       * رقم الشركة → الموظف
+       */
+
+      case "RETURN": {
+        if (task.status !== "REVIEW") {
+          return NextResponse.json(
+            {
+              error:
+                "Task must be under review before returning",
+            },
+            {
+              status: 400,
+            }
+          );
+        }
+
+        newStatus = "IN_PROGRESS";
 
         activity =
           "تمت إعادة المهمة للتنفيذ";
 
         whatsappReceiver =
-          task.employee.phone ||
-          "";
+          task.employee.phone || "";
 
-        whatsappMessage = `↩ تم إرجاع المهمة للتعديل
+        whatsappMessage = `↩️ تم إرجاع المهمة للتعديل
 
-المهمة:
+👤 الموظف:
+${task.employee.user.name}
+
+📌 المهمة:
 ${task.title}
 
-يرجى مراجعتها وإعادة رفعها.`;
+👥 العميل:
+${task.client.name}
+
+تمت مراجعة المهمة وتحتاج إلى تعديلات.
+
+يرجى الدخول إلى TrendX OS ومراجعة المطلوب وتنفيذ التعديلات.
+
+TrendX OS`;
 
         break;
+      }
 
       default:
         return NextResponse.json(
           {
-            error:
-              "Invalid action",
+            error: "Invalid action",
           },
           {
             status: 400,
@@ -206,15 +363,28 @@ ${task.title}
         );
     }
 
+    /*
+     * =========================
+     * تحديث المهمة
+     * =========================
+     */
+
     const updatedTask =
       await prisma.task.update({
         where: {
           id,
         },
+
         data: {
           status: newStatus,
         },
       });
+
+    /*
+     * =========================
+     * تسجيل النشاط
+     * =========================
+     */
 
     await prisma.taskActivity.create({
       data: {
@@ -223,6 +393,22 @@ ${task.title}
       },
     });
 
+    /*
+     * =========================
+     * إرسال WhatsApp
+     * =========================
+     *
+     * كل الرسائل تخرج من رقم الشركة
+     * المتصل بـ WhatsApp Service.
+     *
+     * المستلم يتغير حسب الحدث:
+     *
+     * START          → ADMIN
+     * SUBMIT_REVIEW  → ADMIN
+     * APPROVE        → EMPLOYEE
+     * RETURN         → EMPLOYEE
+     */
+
     try {
       if (
         whatsappReceiver &&
@@ -230,14 +416,37 @@ ${task.title}
       ) {
         await sendWhatsAppMessage({
           to: whatsappReceiver,
-          message:
-            whatsappMessage,
+          message: whatsappMessage,
         });
+
+        console.log(
+          "📱 Workflow WhatsApp sent successfully"
+        );
+
+        console.log(
+          "📤 Receiver:",
+          whatsappReceiver
+        );
+      } else {
+        console.log(
+          "⚠️ WhatsApp notification skipped"
+        );
+
+        if (!whatsappReceiver) {
+          console.log(
+            "⚠️ WhatsApp receiver is missing"
+          );
+        }
       }
-    } catch (error) {
+    } catch (whatsappError) {
+      /*
+       * لو WhatsApp فشل،
+       * المهمة نفسها تفضل اتحدثت عادي.
+       */
+
       console.error(
-        "Workflow WhatsApp Error:",
-        error
+        "❌ Workflow WhatsApp Error:",
+        whatsappError
       );
     }
 
@@ -278,10 +487,7 @@ export async function DELETE(
       );
     }
 
-    if (
-      currentUser.role !==
-      "ADMIN"
-    ) {
+    if (currentUser.role !== "ADMIN") {
       return NextResponse.json(
         {
           error:
@@ -295,11 +501,12 @@ export async function DELETE(
 
     const { id } = await params;
 
-    const task = await prisma.task.findUnique({
-      where: {
-        id,
-      },
-    });
+    const task =
+      await prisma.task.findUnique({
+        where: {
+          id,
+        },
+      });
 
     if (!task) {
       return NextResponse.json(

@@ -1,60 +1,64 @@
-import axios from "axios";
+type SendWhatsAppOptions = {
+  to: string;
+  message: string;
+};
 
 export async function sendWhatsAppMessage({
   to,
   message,
-}: {
-  to: string;
-  message: string;
-}) {
-  try {
-    console.log(
-      "================================"
-    );
-    console.log(
-      "Sending WhatsApp To:",
-      to
-    );
-    console.log(
-      "Message:",
-      message
-    );
-    console.log(
-      "================================"
-    );
+}: SendWhatsAppOptions) {
+  const serviceUrl =
+    process.env.WHATSAPP_SERVICE_URL;
 
-    const response = await axios.post(
-      `https://graph.facebook.com/v23.0/${process.env.WHATSAPP_PHONE_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to,
-        type: "text",
-        text: {
-          body: message,
-        },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-          "Content-Type":
-            "application/json",
-        },
-      }
-    );
+  const token =
+    process.env.WHATSAPP_SERVICE_TOKEN;
 
-    console.log(
-      "WhatsApp Success:",
-      response.data
-    );
-  } catch (error: any) {
-    console.error(
-      "WhatsApp Error Response:",
-      error?.response?.data
-    );
-
-    console.error(
-      "WhatsApp Error:",
-      error?.message
+  if (!serviceUrl) {
+    throw new Error(
+      "WHATSAPP_SERVICE_URL is missing"
     );
   }
+
+  if (!token) {
+    throw new Error(
+      "WHATSAPP_SERVICE_TOKEN is missing"
+    );
+  }
+
+  if (!to) {
+    throw new Error(
+      "WhatsApp phone number is missing"
+    );
+  }
+
+  const response = await fetch(
+    `${serviceUrl}/send`,
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type":
+          "application/json",
+
+        "x-api-token": token,
+      },
+
+      body: JSON.stringify({
+        to,
+        message,
+      }),
+    }
+  );
+
+  const data =
+    await response.json();
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error ||
+        "Failed to send WhatsApp message"
+    );
+  }
+
+  return data;
 }
