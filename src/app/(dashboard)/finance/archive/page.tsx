@@ -1,9 +1,10 @@
-export const dynamic = "force-dynamic";
-
+import { connection } from "next/server";
 import { prisma } from "@/lib/prisma";
 import Link from "next/link";
 
 export default async function InvoiceArchivePage() {
+  await connection();
+
   const invoices = await prisma.invoice.findMany({
     where: {
       status: "PAID",
@@ -12,7 +13,6 @@ export default async function InvoiceArchivePage() {
       updatedAt: "desc",
     },
   });
-
   const totalInvoices = invoices.length;
 
   const totalSales = invoices.reduce(
