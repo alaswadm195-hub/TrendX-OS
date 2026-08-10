@@ -141,6 +141,113 @@ export default function AddAppointmentModal({
     setClientSearch("");
   }
 
+  /**
+   * Converts a datetime-local value entered by the user
+   * as Cairo local time into a UTC ISO string.
+   *
+   * Example:
+   * 2026-08-10T18:00
+   * Cairo local time
+   * ->
+   * 2026-08-10T15:00:00.000Z
+   */
+  function cairoDateTimeToISO(
+    value: string
+  ): string | null {
+    if (!value) return null;
+
+    const [datePart, timePart] =
+      value.split("T");
+
+    if (!datePart || !timePart) {
+      throw new Error(
+        "Invalid appointment date"
+      );
+    }
+
+    const [year, month, day] =
+      datePart.split("-").map(Number);
+
+    const [hour, minute] =
+      timePart.split(":").map(Number);
+
+    if (
+      !year ||
+      !month ||
+      !day ||
+      Number.isNaN(hour) ||
+      Number.isNaN(minute)
+    ) {
+      throw new Error(
+        "Invalid appointment date"
+      );
+    }
+
+    /*
+     * First treat the selected Cairo time
+     * as if it were UTC.
+     */
+    const assumedUTC = new Date(
+      Date.UTC(
+        year,
+        month - 1,
+        day,
+        hour,
+        minute
+      )
+    );
+
+    /*
+     * Find what Cairo displays for that
+     * assumed UTC timestamp.
+     */
+    const cairoParts =
+      new Intl.DateTimeFormat(
+        "en-CA",
+        {
+          timeZone: "Africa/Cairo",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        }
+      ).formatToParts(assumedUTC);
+
+    const getPart = (
+      type: string
+    ): number => {
+      const part = cairoParts.find(
+        (item) => item.type === type
+      );
+
+      return Number(part?.value);
+    };
+
+    const cairoAsUTC = Date.UTC(
+      getPart("year"),
+      getPart("month") - 1,
+      getPart("day"),
+      getPart("hour"),
+      getPart("minute")
+    );
+
+    /*
+     * Calculate Cairo's offset for this date.
+     */
+    const offset =
+      cairoAsUTC -
+      assumedUTC.getTime();
+
+    /*
+     * Convert Cairo local time to UTC.
+     */
+    return new Date(
+      assumedUTC.getTime() - offset
+    ).toISOString();
+  }
+
   async function handleSubmit(
     e: React.FormEvent
   ) {
@@ -150,7 +257,9 @@ export default function AddAppointmentModal({
       clientMode === "existing" &&
       !form.clientId
     ) {
-      alert("من فضلك اختر عميلًا موجودًا");
+      alert(
+        "من فضلك اختر عميلًا موجودًا"
+      );
       return;
     }
 
@@ -158,7 +267,9 @@ export default function AddAppointmentModal({
       clientMode === "new" &&
       !newClient.name.trim()
     ) {
-      alert("من فضلك اكتب اسم العميل");
+      alert(
+        "من فضلك اكتب اسم العميل"
+      );
       return;
     }
 
@@ -166,27 +277,53 @@ export default function AddAppointmentModal({
       clientMode === "new" &&
       !newClient.phone.trim()
     ) {
-      alert("من فضلك اكتب رقم هاتف العميل");
+      alert(
+        "من فضلك اكتب رقم هاتف العميل"
+      );
+      return;
+    }
+
+    if (!form.appointmentDate) {
+      alert(
+        "من فضلك حدد تاريخ ووقت الموعد"
+      );
       return;
     }
 
     setLoading(true);
 
     try {
+      const appointmentDate =
+        cairoDateTimeToISO(
+          form.appointmentDate
+        );
+
+      if (!appointmentDate) {
+        throw new Error(
+          "Invalid appointment date"
+        );
+      }
+
       const payload = {
         ...form,
 
-        // الرقم الثابت الذي سيستقبل إشعار الواتساب
+        /*
+         * IMPORTANT:
+         * datetime-local is treated as Cairo time
+         * and converted to UTC before sending.
+         */
+        appointmentDate,
+
         whatsappNotificationPhone,
 
-        // لو عميل جديد، السيرفر سينشئه تلقائيًا
         newClient:
           clientMode === "new"
             ? {
                 name: newClient.name.trim(),
                 phone: newClient.phone.trim(),
                 notes:
-                  newClient.notes.trim() || null,
+                  newClient.notes.trim() ||
+                  null,
               }
             : null,
       };
@@ -218,11 +355,21 @@ export default function AddAppointmentModal({
       setOpen(false);
       resetForm();
 
+      /*
+       * Force the appointments list to
+       * load the latest server data.
+       */
+      router.replace("/appointments");
       router.refresh();
     } catch (error) {
-      console.error(error);
+      console.error(
+        "Create appointment error:",
+        error
+      );
 
-      alert("فشل إنشاء الموعد");
+      alert(
+        "فشل إنشاء الموعد"
+      );
     } finally {
       setLoading(false);
     }
@@ -395,7 +542,8 @@ export default function AddAppointmentModal({
                 </div>
 
                 {/* عميل موجود */}
-                {clientMode === "existing" && (
+                {clientMode ===
+                  "existing" && (
                   <div className="space-y-2">
                     <input
                       type="text"
@@ -475,7 +623,8 @@ export default function AddAppointmentModal({
                 )}
 
                 {/* عميل جديد */}
-                {clientMode === "new" && (
+                {clientMode ===
+                  "new" && (
                   <div className="space-y-3 bg-slate-50 border rounded-xl p-3 sm:p-4">
                     <div>
                       <label className="block text-sm text-slate-600 mb-1">
@@ -600,14 +749,16 @@ export default function AddAppointmentModal({
                   اختر الموظف
                 </option>
 
-                {employees.map((employee) => (
-                  <option
-                    key={employee.id}
-                    value={employee.id}
-                  >
-                    {employee.user.name}
-                  </option>
-                ))}
+                {employees.map(
+                  (employee) => (
+                    <option
+                      key={employee.id}
+                      value={employee.id}
+                    >
+                      {employee.user.name}
+                    </option>
+                  )
+                )}
               </select>
 
               {/* رقم الواتساب الثابت */}
@@ -683,7 +834,8 @@ export default function AddAppointmentModal({
                   }
                 />
 
-                {clientMode === "existing" && (
+                {clientMode ===
+                  "existing" && (
                   <p className="text-xs text-slate-500 leading-5">
                     يتم إدخال الرقم تلقائيًا
                     من بيانات العميل.
@@ -716,30 +868,42 @@ export default function AddAppointmentModal({
               />
 
               {/* التاريخ */}
-              <input
-                type="datetime-local"
-                required
-                className="
-                  w-full
-                  border
-                  rounded-xl
-                  p-3
-                  text-base
-                  bg-white
-                  outline-none
-                  focus:ring-2
-                  focus:ring-blue-500/20
-                  focus:border-blue-500
-                "
-                value={form.appointmentDate}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    appointmentDate:
-                      e.target.value,
-                  })
-                }
-              />
+              <div className="space-y-1">
+                <label className="block text-sm font-medium">
+                  تاريخ ووقت الموعد
+                </label>
+
+                <input
+                  type="datetime-local"
+                  required
+                  className="
+                    w-full
+                    border
+                    rounded-xl
+                    p-3
+                    text-base
+                    bg-white
+                    outline-none
+                    focus:ring-2
+                    focus:ring-blue-500/20
+                    focus:border-blue-500
+                  "
+                  value={
+                    form.appointmentDate
+                  }
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      appointmentDate:
+                        e.target.value,
+                    })
+                  }
+                />
+
+                <p className="text-xs text-slate-500">
+                  الوقت حسب توقيت القاهرة.
+                </p>
+              </div>
 
               {/* المكان */}
               <input

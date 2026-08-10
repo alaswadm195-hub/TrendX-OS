@@ -37,115 +37,182 @@ export default function AppointmentActions({
 }) {
   const router = useRouter();
 
-  const [loading, setLoading] =
-    useState(false);
+  const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
 
-  const [editing, setEditing] =
-    useState(false);
-
-  const [clients, setClients] =
-    useState<Client[]>([]);
-
-  const [employees, setEmployees] =
-    useState<Employee[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
 
   const [form, setForm] = useState({
     title: appointment.title,
     clientId: appointment.clientId,
-    employeeId:
-      appointment.employeeId || "",
-    customerName:
-      appointment.customerName || "",
-    customerPhone:
-      appointment.customerPhone || "",
+    employeeId: appointment.employeeId || "",
+    customerName: appointment.customerName || "",
+    customerPhone: appointment.customerPhone || "",
     appointmentDate: "",
     endDate: "",
-    location:
-      appointment.location || "",
-    meetingLink:
-      appointment.meetingLink || "",
+    location: appointment.location || "",
+    meetingLink: appointment.meetingLink || "",
     notes: appointment.notes || "",
   });
 
-  function formatDateTimeLocal(
-    value: string | null
-  ) {
+  /**
+   * Convert UTC ISO date to Cairo local datetime-local value.
+   *
+   * Example:
+   * 2026-08-10T15:00:00.000Z
+   * ->
+   * 2026-08-10T18:00
+   */
+  function formatDateTimeLocal(value: string | null) {
     if (!value) return "";
 
     const date = new Date(value);
 
-    const year = date.getFullYear();
-    const month = String(
-      date.getMonth() + 1
-    ).padStart(2, "0");
-    const day = String(
-      date.getDate()
-    ).padStart(2, "0");
-    const hours = String(
-      date.getHours()
-    ).padStart(2, "0");
-    const minutes = String(
-      date.getMinutes()
-    ).padStart(2, "0");
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Africa/Cairo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date);
 
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
+    const get = (type: string) =>
+      parts.find((part) => part.type === type)?.value || "";
+
+    return `${get("year")}-${get("month")}-${get(
+      "day"
+    )}T${get("hour")}:${get("minute")}`;
+  }
+
+  /**
+   * Convert Cairo datetime-local value to UTC ISO.
+   *
+   * The browser's timezone must NOT control the result.
+   */
+  function cairoDateTimeToISO(value: string) {
+    if (!value) return null;
+
+    const [datePart, timePart] = value.split("T");
+
+    if (!datePart || !timePart) {
+      throw new Error("Invalid appointment date");
+    }
+
+    const [year, month, day] = datePart
+      .split("-")
+      .map(Number);
+
+    const [hour, minute] = timePart
+      .split(":")
+      .map(Number);
+
+    if (
+      !year ||
+      !month ||
+      !day ||
+      Number.isNaN(hour) ||
+      Number.isNaN(minute)
+    ) {
+      throw new Error("Invalid appointment date");
+    }
+
+    /*
+     * Egypt is UTC+2 in standard time and UTC+3 during DST.
+     * Using Intl allows the runtime to determine the correct
+     * Cairo offset for the selected date.
+     */
+
+    const assumedUTC = new Date(
+      Date.UTC(
+        year,
+        month - 1,
+        day,
+        hour,
+        minute
+      )
+    );
+
+    const cairoParts = new Intl.DateTimeFormat(
+      "en-CA",
+      {
+        timeZone: "Africa/Cairo",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }
+    ).formatToParts(assumedUTC);
+
+    const getPart = (type: string) =>
+      Number(
+        cairoParts.find(
+          (part) => part.type === type
+        )?.value
+      );
+
+    const cairoAsUTC = Date.UTC(
+      getPart("year"),
+      getPart("month") - 1,
+      getPart("day"),
+      getPart("hour"),
+      getPart("minute")
+    );
+
+    const offset = cairoAsUTC - assumedUTC.getTime();
+
+    return new Date(
+      assumedUTC.getTime() - offset
+    ).toISOString();
   }
 
   async function openEdit() {
     setForm({
       title: appointment.title,
       clientId: appointment.clientId,
-      employeeId:
-        appointment.employeeId || "",
-      customerName:
-        appointment.customerName || "",
-      customerPhone:
-        appointment.customerPhone || "",
-      appointmentDate:
-        formatDateTimeLocal(
-          appointment.appointmentDate
-        ),
-      endDate:
-        formatDateTimeLocal(
-          appointment.endDate
-        ),
-      location:
-        appointment.location || "",
-      meetingLink:
-        appointment.meetingLink || "",
+      employeeId: appointment.employeeId || "",
+      customerName: appointment.customerName || "",
+      customerPhone: appointment.customerPhone || "",
+
+      appointmentDate: formatDateTimeLocal(
+        appointment.appointmentDate
+      ),
+
+      endDate: formatDateTimeLocal(
+        appointment.endDate
+      ),
+
+      location: appointment.location || "",
+      meetingLink: appointment.meetingLink || "",
       notes: appointment.notes || "",
     });
 
     setEditing(true);
 
     try {
-      const [
-        clientsRes,
-        employeesRes,
-      ] = await Promise.all([
-        fetch("/api/clients"),
-        fetch("/api/employees"),
-      ]);
+      const [clientsRes, employeesRes] =
+        await Promise.all([
+          fetch("/api/clients"),
+          fetch("/api/employees"),
+        ]);
 
       if (clientsRes.ok) {
-        setClients(
-          await clientsRes.json()
-        );
+        setClients(await clientsRes.json());
       }
 
       if (employeesRes.ok) {
-        setEmployees(
-          await employeesRes.json()
-        );
+        setEmployees(await employeesRes.json());
       }
     } catch (error) {
       console.error(error);
     }
   }
 
-  async function updateStatus(
-    newStatus: string
-  ) {
+  async function updateStatus(newStatus: string) {
     setLoading(true);
 
     try {
@@ -154,8 +221,7 @@ export default function AppointmentActions({
         {
           method: "PATCH",
           headers: {
-            "Content-Type":
-              "application/json",
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             status: newStatus,
@@ -195,22 +261,28 @@ export default function AppointmentActions({
     }
 
     if (!form.appointmentDate) {
-      alert(
-        "حدد تاريخ ووقت الموعد"
-      );
+      alert("حدد تاريخ ووقت الموعد");
       return;
     }
 
     setLoading(true);
 
     try {
+      const appointmentDate =
+        cairoDateTimeToISO(
+          form.appointmentDate
+        );
+
+      const endDate = form.endDate
+        ? cairoDateTimeToISO(form.endDate)
+        : null;
+
       const res = await fetch(
         `/api/appointments/${appointment.id}`,
         {
           method: "PATCH",
           headers: {
-            "Content-Type":
-              "application/json",
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             title: form.title,
@@ -221,15 +293,8 @@ export default function AppointmentActions({
               form.customerName || null,
             customerPhone:
               form.customerPhone || null,
-            appointmentDate:
-              new Date(
-                form.appointmentDate
-              ).toISOString(),
-            endDate: form.endDate
-              ? new Date(
-                  form.endDate
-                ).toISOString()
-              : null,
+            appointmentDate,
+            endDate,
             location:
               form.location || null,
             meetingLink:
@@ -241,10 +306,27 @@ export default function AppointmentActions({
       );
 
       if (!res.ok) {
-        throw new Error();
+        const data = await res
+          .json()
+          .catch(() => null);
+
+        throw new Error(
+          data?.error ||
+            "Failed to update appointment"
+        );
       }
 
       setEditing(false);
+
+      /*
+       * IMPORTANT:
+       * Refreshing the details page alone does not
+       * guarantee that /appointments gets the new data.
+       *
+       * Navigate to the appointments list so it
+       * fetches the latest server data.
+       */
+      router.replace("/appointments");
       router.refresh();
     } catch (error) {
       console.error(error);
@@ -275,9 +357,7 @@ export default function AppointmentActions({
             <button
               disabled={loading}
               onClick={() =>
-                updateStatus(
-                  "COMPLETED"
-                )
+                updateStatus("COMPLETED")
               }
               className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl transition disabled:opacity-50"
             >
@@ -287,9 +367,7 @@ export default function AppointmentActions({
             <button
               disabled={loading}
               onClick={() =>
-                updateStatus(
-                  "NO_SHOW"
-                )
+                updateStatus("NO_SHOW")
               }
               className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-xl transition disabled:opacity-50"
             >
@@ -307,9 +385,7 @@ export default function AppointmentActions({
             <button
               disabled={loading}
               onClick={() =>
-                updateStatus(
-                  "CANCELLED"
-                )
+                updateStatus("CANCELLED")
               }
               className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl transition disabled:opacity-50"
             >
@@ -407,9 +483,7 @@ export default function AppointmentActions({
                   </label>
 
                   <select
-                    value={
-                      form.employeeId
-                    }
+                    value={form.employeeId}
                     onChange={(e) =>
                       setForm({
                         ...form,
@@ -442,9 +516,7 @@ export default function AppointmentActions({
                   </label>
 
                   <input
-                    value={
-                      form.customerName
-                    }
+                    value={form.customerName}
                     onChange={(e) =>
                       setForm({
                         ...form,
@@ -462,9 +534,7 @@ export default function AppointmentActions({
                   </label>
 
                   <input
-                    value={
-                      form.customerPhone
-                    }
+                    value={form.customerPhone}
                     onChange={(e) =>
                       setForm({
                         ...form,
@@ -505,9 +575,7 @@ export default function AppointmentActions({
 
                   <input
                     type="datetime-local"
-                    value={
-                      form.endDate
-                    }
+                    value={form.endDate}
                     onChange={(e) =>
                       setForm({
                         ...form,
@@ -525,9 +593,7 @@ export default function AppointmentActions({
                   </label>
 
                   <input
-                    value={
-                      form.location
-                    }
+                    value={form.location}
                     onChange={(e) =>
                       setForm({
                         ...form,
@@ -572,8 +638,7 @@ export default function AppointmentActions({
                   onChange={(e) =>
                     setForm({
                       ...form,
-                      notes:
-                        e.target.value,
+                      notes: e.target.value,
                     })
                   }
                   className="w-full border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 resize-none"
