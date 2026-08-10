@@ -179,10 +179,19 @@ export async function PATCH(
       appointment.customerPhone
     );
 
+    /*
+     * ==========================================
+     * WhatsApp Confirmation Notification
+     * ==========================================
+     *
+     * The appointment is stored as UTC in the
+     * database, but the customer should always
+     * receive the date/time in Cairo timezone.
+     */
+
     if (
       previousStatus !== "CONFIRMED" &&
-      appointment.status ===
-        "CONFIRMED" &&
+      appointment.status === "CONFIRMED" &&
       appointment.customerPhone
     ) {
       console.log(
@@ -190,19 +199,42 @@ export async function PATCH(
       );
 
       try {
+        const appointmentDate =
+          new Date(
+            appointment.appointmentDate
+          );
+
+        const formattedDate =
+          appointmentDate.toLocaleDateString(
+            "ar-EG",
+            {
+              timeZone: "Africa/Cairo",
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }
+          );
+
+        const formattedTime =
+          appointmentDate.toLocaleTimeString(
+            "ar-EG",
+            {
+              timeZone: "Africa/Cairo",
+              hour: "2-digit",
+              minute: "2-digit",
+            }
+          );
+
         await sendWhatsAppMessage({
           to: appointment.customerPhone,
+
           message: `تم تأكيد موعدك مع TrendX
 
 📅 التاريخ:
-${new Date(
-  appointment.appointmentDate
-).toLocaleDateString("ar-EG")}
+${formattedDate}
 
 ⏰ الوقت:
-${new Date(
-  appointment.appointmentDate
-).toLocaleTimeString("ar-EG")}
+${formattedTime}
 
 📍 المكان:
 ${appointment.location || "سيتم تحديده لاحقاً"}
@@ -242,7 +274,8 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const currentUser = await getCurrentUser();
+    const currentUser =
+      await getCurrentUser();
 
     if (!currentUser) {
       return NextResponse.json(

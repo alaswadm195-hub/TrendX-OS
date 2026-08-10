@@ -373,28 +373,28 @@ export async function POST(
         );
       } else {
         const appointmentDate =
-          new Date(
-            appointment.appointmentDate
-          );
+  new Date(appointment.appointmentDate);
 
         const formattedDate =
-          appointmentDate.toLocaleDateString(
-            "ar-EG",
-            {
-              year: "numeric",
-              month: "2-digit",
-              day: "2-digit",
-            }
-          );
+  appointmentDate.toLocaleDateString(
+    "ar-EG",
+    {
+      timeZone: "Africa/Cairo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }
+  );
 
         const formattedTime =
-          appointmentDate.toLocaleTimeString(
-            "ar-EG",
-            {
-              hour: "2-digit",
-              minute: "2-digit",
-            }
-          );
+  appointmentDate.toLocaleTimeString(
+    "ar-EG",
+    {
+      timeZone: "Africa/Cairo",
+      hour: "2-digit",
+      minute: "2-digit",
+    }
+  );
 
         const employeeName =
           appointment.employee?.user?.name ||
