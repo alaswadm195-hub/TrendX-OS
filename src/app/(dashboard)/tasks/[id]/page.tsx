@@ -1,3 +1,4 @@
+import { requireAuth } from "@/lib/guards";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
@@ -11,6 +12,8 @@ export default async function TaskDetailsPage({
     id: string;
   }>;
 }) {
+  const currentUser = await requireAuth();
+
   const { id } = await params;
 
   const task = await prisma.task.findUnique({
@@ -21,7 +24,7 @@ export default async function TaskDetailsPage({
       client: true,
       employee: {
         include: {
-          user: true,
+          user: { select: { id: true, name: true, email: true, role: true } },
         },
       },
       activities: {
@@ -33,6 +36,10 @@ export default async function TaskDetailsPage({
   });
 
   if (!task) {
+    notFound();
+  }
+
+  if (currentUser.role !== "ADMIN" && task.employeeId !== currentUser.employeeId) {
     notFound();
   }
 

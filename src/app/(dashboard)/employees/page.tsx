@@ -1,37 +1,115 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
+
+import { requireAdmin } from "@/lib/guards";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/current-user";
+
 import AddEmployeeModal from "@/components/employees/AddEmployeeModal";
 import EditEmployeeModal from "@/components/employees/EditEmployeeModal";
 import DeleteEmployeeButton from "@/components/employees/DeleteEmployeeButton";
 
+type MoneyValue =
+  | number
+  | {
+      toString(): string;
+    };
+
+function moneyToNumber(
+  value: MoneyValue,
+) {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : Number(value.toString());
+
+  if (!Number.isFinite(numericValue)) {
+    throw new Error(
+      "Invalid monetary value",
+    );
+  }
+
+  return numericValue;
+}
+
+function toCents(
+  value: MoneyValue,
+) {
+  const numericValue =
+    moneyToNumber(value);
+
+  const cents =
+    Math.round(
+      numericValue * 100,
+    );
+
+  if (!Number.isSafeInteger(cents)) {
+    throw new Error(
+      "Monetary value is out of range",
+    );
+  }
+
+  return cents;
+}
+
+function fromCents(
+  cents: number,
+) {
+  if (!Number.isSafeInteger(cents)) {
+    throw new Error(
+      "Monetary total is out of range",
+    );
+  }
+
+  return cents / 100;
+}
+
 export default async function EmployeesPage() {
-  const currentUser =
-    await getCurrentUser();
+  await requireAdmin();
 
-  if (!currentUser) {
-    redirect("/login");
-  }
-
-  if (
-    currentUser.role !==
-    "ADMIN"
-  ) {
-    redirect("/tasks");
-  }
-
-  const employees =
+  const rawEmployees =
     await prisma.employee.findMany({
       include: {
-        user: true,
-        tasks: true,
-        appointments: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+
+        _count: {
+          select: {
+            tasks: true,
+            appointments: true,
+          },
+        },
       },
+
       orderBy: {
         createdAt: "desc",
       },
     });
+
+  /*
+   * Salary is currently Float and is planned to become Decimal.
+   * Normalize it to a plain number before calculations and before passing
+   * employee data to client components.
+   */
+  const employees =
+    rawEmployees.map(
+      (employee) => ({
+        ...employee,
+
+        salary:
+          employee.salary === null
+            ? null
+            : moneyToNumber(
+                employee.salary,
+              ),
+      }),
+    );
 
   const totalEmployees =
     employees.length;
@@ -40,22 +118,35 @@ export default async function EmployeesPage() {
     employees.filter(
       (employee) =>
         employee.status ===
-        "ACTIVE"
+        "ACTIVE",
     ).length;
 
   const vacationEmployees =
     employees.filter(
       (employee) =>
         employee.status ===
-        "VACATION"
+        "VACATION",
     ).length;
 
-  const totalSalaries =
+  /*
+   * Aggregate salaries in integer cents so the result remains safe before
+   * and after the Float -> Decimal migration.
+   */
+  const totalSalariesCents =
     employees.reduce(
       (sum, employee) =>
         sum +
-        (employee.salary || 0),
-      0
+        (employee.salary === null
+          ? 0
+          : toCents(
+              employee.salary,
+            )),
+      0,
+    );
+
+  const totalSalaries =
+    fromCents(
+      totalSalariesCents,
     );
 
   return (
@@ -111,7 +202,10 @@ export default async function EmployeesPage() {
           </p>
 
           <h3 className="text-3xl font-bold mt-2 text-blue-600">
-            {totalSalaries.toLocaleString()} ج
+            {totalSalaries.toLocaleString(
+              "ar-EG",
+            )}{" "}
+            ج
           </h3>
         </div>
       </div>
@@ -123,11 +217,9 @@ export default async function EmployeesPage() {
           </h2>
         </div>
 
-        {employees.length ===
-        0 ? (
+        {employees.length === 0 ? (
           <div className="p-10 text-center text-slate-500">
-            لا يوجد موظفين حتى
-            الآن
+            لا يوجد موظفين حتى الآن
           </div>
         ) : (
           <>
@@ -171,9 +263,7 @@ export default async function EmployeesPage() {
 
                 <tbody>
                   {employees.map(
-                    (
-                      employee
-                    ) => (
+                    (employee) => (
                       <tr
                         key={
                           employee.id
@@ -199,24 +289,28 @@ export default async function EmployeesPage() {
                         </td>
 
                         <td className="p-4">
-                          {employee.salary?.toLocaleString() ||
-                            0}{" "}
+                          {(
+                            employee.salary ??
+                            0
+                          ).toLocaleString(
+                            "ar-EG",
+                          )}{" "}
                           ج
                         </td>
 
                         <td className="p-4">
                           {
                             employee
+                              ._count
                               .tasks
-                              .length
                           }
                         </td>
 
                         <td className="p-4">
                           {
                             employee
+                              ._count
                               .appointments
-                              .length
                           }
                         </td>
 
@@ -265,7 +359,7 @@ export default async function EmployeesPage() {
                           </div>
                         </td>
                       </tr>
-                    )
+                    ),
                   )}
                 </tbody>
               </table>
@@ -273,9 +367,7 @@ export default async function EmployeesPage() {
 
             <div className="lg:hidden p-4 space-y-4">
               {employees.map(
-                (
-                  employee
-                ) => (
+                (employee) => (
                   <div
                     key={
                       employee.id
@@ -327,8 +419,12 @@ export default async function EmployeesPage() {
 
                       <p>
                         الراتب:{" "}
-                        {employee.salary?.toLocaleString() ||
-                          0}{" "}
+                        {(
+                          employee.salary ??
+                          0
+                        ).toLocaleString(
+                          "ar-EG",
+                        )}{" "}
                         ج
                       </p>
 
@@ -336,8 +432,8 @@ export default async function EmployeesPage() {
                         المهام:{" "}
                         {
                           employee
+                            ._count
                             .tasks
-                            .length
                         }
                       </p>
 
@@ -345,8 +441,8 @@ export default async function EmployeesPage() {
                         المواعيد:{" "}
                         {
                           employee
+                            ._count
                             .appointments
-                            .length
                         }
                       </p>
                     </div>
@@ -372,7 +468,7 @@ export default async function EmployeesPage() {
                       />
                     </div>
                   </div>
-                )
+                ),
               )}
             </div>
           </>

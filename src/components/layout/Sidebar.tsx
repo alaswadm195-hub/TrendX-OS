@@ -16,6 +16,7 @@ import {
   Settings,
   LogOut,
   FileText,
+  type LucideIcon,
 } from "lucide-react";
 
 const workItems = [
@@ -88,13 +89,22 @@ export default function Sidebar({
   const isAdmin =
     role === "ADMIN";
 
+  const itemClassName = (
+    isActive: boolean,
+  ) =>
+    `group relative flex items-center gap-3 overflow-hidden rounded-2xl px-4 py-3.5 transition-all duration-200 ${
+      isActive
+        ? "bg-white/[0.09] text-white shadow-[0_10px_24px_rgba(0,0,0,0.16)] ring-1 ring-white/10"
+        : "text-slate-300 hover:bg-white/[0.055] hover:text-white"
+    }`;
+
   const renderItem = (
     item: {
       name: string;
-      icon: any;
+      icon: LucideIcon;
       href: string;
       adminOnly?: boolean;
-    }
+    },
   ) => {
     if (
       item.adminOnly &&
@@ -103,13 +113,15 @@ export default function Sidebar({
       return null;
     }
 
-    const Icon = item.icon;
+    const Icon =
+      item.icon;
 
     const isActive =
       pathname === item.href ||
-      (item.href !== "/dashboard" &&
+      (item.href !==
+        "/dashboard" &&
         pathname.startsWith(
-          item.href
+          item.href,
         ));
 
     return (
@@ -117,88 +129,122 @@ export default function Sidebar({
         key={item.name}
         href={item.href}
         onClick={onClose}
-        className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200 ${
-          isActive
-            ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20"
-            : "text-slate-300 hover:bg-slate-800 hover:text-white"
-        }`}
+        className={itemClassName(
+          isActive,
+        )}
       >
-        <Icon size={20} />
+        {isActive && (
+          <span
+            aria-hidden="true"
+            className="absolute right-0 top-1/2 h-8 w-1 -translate-y-1/2 rounded-l-full bg-gradient-to-b from-[#f6a43d] to-[#ee7c31]"
+          />
+        )}
 
-        <span className="font-medium">
+        <span
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
+            isActive
+              ? "bg-[#f28a32]/15 text-[#ffad55]"
+              : "bg-white/[0.04] text-slate-400 group-hover:bg-white/[0.07] group-hover:text-white"
+          }`}
+        >
+          <Icon size={19} />
+        </span>
+
+        <span className="font-semibold">
           {item.name}
         </span>
       </Link>
     );
   };
 
-  const SidebarContent = () => (
+  const sidebarContent = (
     <>
-      <div className="border-b border-slate-800 px-6 py-8">
-        <div className="flex flex-col items-center">
-          <Image
-            src="/logo.png"
-            alt="TrendX"
-            width={90}
-            height={90}
-            priority
-            className="object-contain"
-          />
+      {/* Brand */}
+      <div className="border-b border-white/[0.07] px-5 py-7">
+        <div className="flex flex-col items-center text-center">
+          <div className="flex h-24 w-24 items-center justify-center rounded-[28px] border border-white/[0.07] bg-white/[0.04] shadow-[0_16px_36px_rgba(0,0,0,0.18)]">
+            <Image
+              src="/logo.png"
+              alt="TrendX"
+              width={82}
+              height={82}
+              priority
+              className="h-auto w-[76px] object-contain"
+            />
+          </div>
 
-          <h2 className="mt-3 text-lg font-bold">
+          <h2 className="mt-4 text-xl font-black tracking-tight text-white">
             TrendX OS
           </h2>
 
-          <p className="text-xs text-slate-400 mt-1">
-            Business Management
-            System
+          <p className="mt-1 text-[11px] font-medium tracking-wide text-slate-500">
+            Business Management System
           </p>
         </div>
       </div>
 
-      <nav className="flex-1 px-4 py-6 overflow-y-auto">
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto px-4 py-5">
         <div className="space-y-2">
-          <Link
-            href="/dashboard"
-            onClick={onClose}
-            className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200 ${
+          {(() => {
+            const isActive =
               pathname ===
-              "/dashboard"
-                ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20"
-                : "text-slate-300 hover:bg-slate-800 hover:text-white"
-            }`}
-          >
-            <LayoutDashboard
-              size={20}
-            />
+              "/dashboard";
 
-            <span className="font-medium">
-              لوحة التحكم
-            </span>
-          </Link>
+            return (
+              <Link
+                href="/dashboard"
+                onClick={onClose}
+                className={itemClassName(
+                  isActive,
+                )}
+              >
+                {isActive && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute right-0 top-1/2 h-8 w-1 -translate-y-1/2 rounded-l-full bg-gradient-to-b from-[#f6a43d] to-[#ee7c31]"
+                  />
+                )}
+
+                <span
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                    isActive
+                      ? "bg-[#f28a32]/15 text-[#ffad55]"
+                      : "bg-white/[0.04] text-slate-400"
+                  }`}
+                >
+                  <LayoutDashboard size={19} />
+                </span>
+
+                <span className="font-semibold">
+                  لوحة التحكم
+                </span>
+              </Link>
+            );
+          })()}
         </div>
 
         <div className="mt-8">
-          <p className="text-xs text-slate-500 px-3 mb-3 uppercase tracking-wider">
+          <p className="mb-3 px-3 text-[11px] font-bold tracking-wide text-slate-600">
             إدارة العمل
           </p>
 
           <div className="space-y-2">
             {workItems.map(
-              renderItem
+              renderItem,
             )}
           </div>
         </div>
 
         {isAdmin && (
           <div className="mt-8">
-            <p className="text-xs text-slate-500 px-3 mb-3 uppercase tracking-wider">
+            <p className="mb-3 px-3 text-[11px] font-bold tracking-wide text-slate-600">
               الإدارة المالية
             </p>
 
             <div className="space-y-2">
               {financeItems.map(
-                renderItem
+                renderItem,
               )}
             </div>
           </div>
@@ -206,60 +252,85 @@ export default function Sidebar({
 
         {isAdmin && (
           <div className="mt-8">
-            <p className="text-xs text-slate-500 px-3 mb-3 uppercase tracking-wider">
+            <p className="mb-3 px-3 text-[11px] font-bold tracking-wide text-slate-600">
               النظام
             </p>
 
             <div className="space-y-2">
-              <Link
-                href="/settings"
-                onClick={onClose}
-                className={`flex items-center gap-3 rounded-xl px-4 py-3 transition-all duration-200 ${
+              {(() => {
+                const isActive =
                   pathname ===
-                  "/settings"
-                    ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20"
-                    : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                }`}
-              >
-                <Settings
-                  size={20}
-                />
+                  "/settings";
 
-                <span className="font-medium">
-                  الإعدادات
-                </span>
-              </Link>
+                return (
+                  <Link
+                    href="/settings"
+                    onClick={onClose}
+                    className={itemClassName(
+                      isActive,
+                    )}
+                  >
+                    {isActive && (
+                      <span
+                        aria-hidden="true"
+                        className="absolute right-0 top-1/2 h-8 w-1 -translate-y-1/2 rounded-l-full bg-gradient-to-b from-[#f6a43d] to-[#ee7c31]"
+                      />
+                    )}
+
+                    <span
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                        isActive
+                          ? "bg-[#f28a32]/15 text-[#ffad55]"
+                          : "bg-white/[0.04] text-slate-400"
+                      }`}
+                    >
+                      <Settings size={19} />
+                    </span>
+
+                    <span className="font-semibold">
+                      الإعدادات
+                    </span>
+                  </Link>
+                );
+              })()}
             </div>
           </div>
         )}
       </nav>
 
-      <div className="border-t border-slate-800 p-4">
-        <div className="flex items-center gap-3 mb-4 px-2">
-          <div className="w-11 h-11 rounded-xl bg-blue-600 flex items-center justify-center font-bold">
-            {userName.charAt(0)}
+      {/* User */}
+      <div className="border-t border-white/[0.07] p-4">
+        <div className="rounded-2xl border border-white/[0.07] bg-white/[0.04] p-3.5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#f59b3c] to-[#ee7c31] text-base font-black text-white shadow-[0_8px_18px_rgba(238,124,49,0.24)]">
+              {userName
+                .trim()
+                .charAt(0)}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-bold text-white">
+                {userName}
+              </p>
+
+              <p className="mt-0.5 text-xs font-medium text-slate-500">
+                {isAdmin
+                  ? "مدير النظام"
+                  : "موظف"}
+              </p>
+            </div>
           </div>
 
-          <div>
-            <p className="font-medium text-sm">
-              {userName}
-            </p>
-
-            <p className="text-xs text-slate-400">
-              {isAdmin
-                ? "مدير النظام"
-                : "موظف"}
-            </p>
-          </div>
+          <button
+            type="button"
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-orange-400/10 bg-orange-400/[0.06] px-4 py-2.5 text-sm font-semibold text-[#ffad66] transition hover:bg-orange-400/[0.10]"
+          >
+            <LogOut size={17} />
+            <span>
+              تسجيل الخروج
+            </span>
+          </button>
         </div>
-
-        <button className="w-full flex items-center gap-3 rounded-xl px-4 py-3 text-orange-400 hover:bg-slate-800 transition">
-          <LogOut size={18} />
-
-          <span>
-            تسجيل الخروج
-          </span>
-        </button>
       </div>
     </>
   );
@@ -269,22 +340,22 @@ export default function Sidebar({
       {isOpen && (
         <div
           onClick={onClose}
-          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          className="fixed inset-0 z-40 bg-black/55 backdrop-blur-[2px] lg:hidden"
         />
       )}
 
       <aside
-        className={`fixed top-0 right-0 z-50 h-screen w-72 bg-[#0B1020] text-white flex flex-col transform transition-transform duration-300 lg:hidden ${
+        className={`fixed right-0 top-0 z-50 flex h-screen w-72 flex-col border-l border-white/[0.05] bg-[#081326] text-white shadow-2xl transition-transform duration-300 lg:hidden ${
           isOpen
             ? "translate-x-0"
             : "translate-x-full"
         }`}
       >
-        <SidebarContent />
+        {sidebarContent}
       </aside>
 
-      <aside className="hidden lg:flex w-72 min-h-screen bg-[#0B1020] text-white flex-col border-r border-slate-800">
-        <SidebarContent />
+      <aside className="hidden min-h-screen w-72 shrink-0 flex-col border-l border-white/[0.05] bg-[#081326] text-white lg:flex">
+        {sidebarContent}
       </aside>
     </>
   );

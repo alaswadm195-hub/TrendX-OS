@@ -1,6 +1,31 @@
-import { notFound } from "next/navigation";
 import Link from "next/link";
+import { notFound } from "next/navigation";
+
+import { requireAdmin } from "@/lib/guards";
 import { prisma } from "@/lib/prisma";
+
+type MoneyValue =
+  | number
+  | {
+      toString(): string;
+    };
+
+function moneyToNumber(
+  value: MoneyValue,
+) {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : Number(value.toString());
+
+  if (!Number.isFinite(numericValue)) {
+    throw new Error(
+      "Invalid monetary value",
+    );
+  }
+
+  return numericValue;
+}
 
 export default async function EmployeeDetailsPage({
   params,
@@ -9,35 +34,79 @@ export default async function EmployeeDetailsPage({
     id: string;
   }>;
 }) {
+  await requireAdmin();
+
   const { id } =
     await params;
 
-  const employee =
+  const rawEmployee =
     await prisma.employee.findUnique({
       where: {
         id,
       },
-      include: {
-        user: true,
-        tasks: true,
-        appointments: true,
+
+      select: {
+        id: true,
+        phone: true,
+        position: true,
+        salary: true,
+        address: true,
+
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+
+        tasks: {
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            status: true,
+          },
+        },
+
+        appointments: {
+          select: {
+            id: true,
+            status: true,
+          },
+        },
       },
     });
 
-  if (!employee) {
+  if (!rawEmployee) {
     notFound();
   }
+
+  /*
+   * Salary is currently Float and is planned to become Decimal.
+   * Normalize it to a plain number before rendering it in React.
+   */
+  const employee = {
+    ...rawEmployee,
+
+    salary:
+      rawEmployee.salary === null
+        ? null
+        : moneyToNumber(
+            rawEmployee.salary,
+          ),
+  };
 
   const completedTasks =
     employee.tasks.filter(
       (task) =>
-        task.status === "DONE"
+        task.status === "DONE",
     ).length;
 
   const pendingTasks =
     employee.tasks.filter(
       (task) =>
-        task.status !== "DONE"
+        task.status !== "DONE",
     ).length;
 
   const completionRate =
@@ -45,7 +114,7 @@ export default async function EmployeeDetailsPage({
       ? Math.round(
           (completedTasks /
             employee.tasks.length) *
-            100
+            100,
         )
       : 0;
 
@@ -120,34 +189,49 @@ export default async function EmployeeDetailsPage({
 
           <div className="space-y-3">
             <p>
-              <strong>الاسم:</strong>{" "}
+              <strong>
+                الاسم:
+              </strong>{" "}
               {employee.user.name}
             </p>
 
             <p>
-              <strong>البريد:</strong>{" "}
+              <strong>
+                البريد:
+              </strong>{" "}
               {employee.user.email}
             </p>
 
             <p>
-              <strong>الهاتف:</strong>{" "}
+              <strong>
+                الهاتف:
+              </strong>{" "}
               {employee.phone || "-"}
             </p>
 
             <p>
-              <strong>الوظيفة:</strong>{" "}
+              <strong>
+                الوظيفة:
+              </strong>{" "}
               {employee.position || "-"}
             </p>
 
             <p>
-              <strong>الراتب:</strong>{" "}
-              {employee.salary?.toLocaleString() ||
-                0}{" "}
+              <strong>
+                الراتب:
+              </strong>{" "}
+              {(
+                employee.salary ?? 0
+              ).toLocaleString(
+                "ar-EG",
+              )}{" "}
               ج
             </p>
 
             <p>
-              <strong>العنوان:</strong>{" "}
+              <strong>
+                العنوان:
+              </strong>{" "}
               {employee.address || "-"}
             </p>
           </div>
@@ -166,9 +250,7 @@ export default async function EmployeeDetailsPage({
           ) : (
             <div className="space-y-3">
               {employee.appointments.map(
-                (
-                  appointment
-                ) => (
+                (appointment) => (
                   <div
                     key={
                       appointment.id
@@ -181,7 +263,7 @@ export default async function EmployeeDetailsPage({
                       }
                     </p>
                   </div>
-                )
+                ),
               )}
             </div>
           )}
@@ -228,7 +310,7 @@ export default async function EmployeeDetailsPage({
                     {task.status}
                   </span>
                 </div>
-              )
+              ),
             )}
           </div>
         )}

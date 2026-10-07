@@ -1,135 +1,543 @@
-import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
+import { z } from "zod";
+
+import { prisma } from "@/lib/prisma";
 import { InvoiceStatus } from "@/generated/prisma/client";
+import {
+  ApiError,
+  apiError,
+  assertSameOrigin,
+  requireApiAdmin,
+} from "@/lib/api-security";
+import { getClientIp } from "@/lib/rate-limit";
+import {
+  invoiceSchema,
+  parseJson,
+} from "@/lib/validation";
 
-export async function GET() {
-  const invoices =
-    await prisma.invoice.findMany({
-      include: {
-        client: true,
-        payments: true,
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+type MoneyValue =
+  | number
+  | {
+      toString(): string;
+    };
 
-  return NextResponse.json(
-    invoices
+const MAX_IP_LENGTH = 100;
+const MAX_USER_AGENT_LENGTH = 500;
+
+function hasAtMostTwoDecimalPlaces(
+  value: number,
+) {
+  return (
+    Math.round(value * 100) /
+      100 ===
+    value
   );
 }
 
-export async function POST(
-  req: Request
+const invoiceCreateSchema =
+  invoiceSchema.superRefine(
+    (value, ctx) => {
+      if (
+        !hasAtMostTwoDecimalPlaces(
+          value.totalAmount,
+        )
+      ) {
+        ctx.addIssue({
+          code:
+            z.ZodIssueCode.custom,
+          path: ["totalAmount"],
+          message:
+            "Total amount must have at most 2 decimal places",
+        });
+      }
+
+      if (
+        !hasAtMostTwoDecimalPlaces(
+          value.paidAmount,
+        )
+      ) {
+        ctx.addIssue({
+          code:
+            z.ZodIssueCode.custom,
+          path: ["paidAmount"],
+          message:
+            "Paid amount must have at most 2 decimal places",
+        });
+      }
+    },
+  );
+
+function moneyToNumber(
+  value: MoneyValue,
 ) {
-  try {
-    const body =
-      await req.json();
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : Number(value.toString());
 
-    const {
-      clientId,
-      customerName,
-      customerPhone,
-      title,
-      description,
-      totalAmount,
-      paidAmount,
-    } = body;
+  if (!Number.isFinite(numericValue)) {
+    throw new ApiError(
+      409,
+      "Invalid monetary value",
+    );
+  }
 
-    const total =
-      Number(totalAmount);
+  return numericValue;
+}
 
-    const paid = Number(
-      paidAmount || 0
+function toCents(
+  value: MoneyValue,
+) {
+  const numericValue =
+    moneyToNumber(value);
+
+  const cents =
+    Math.round(
+      numericValue * 100,
     );
 
-    const remaining =
-      Math.max(
-        total - paid,
-        0
+  if (!Number.isSafeInteger(cents)) {
+    throw new ApiError(
+      409,
+      "Monetary value is out of range",
+    );
+  }
+
+  return cents;
+}
+
+function fromCents(
+  cents: number,
+) {
+  if (!Number.isSafeInteger(cents)) {
+    throw new ApiError(
+      409,
+      "Monetary value is out of range",
+    );
+  }
+
+  return cents / 100;
+}
+
+function truncateOptional(
+  value: string | null | undefined,
+  maxLength: number,
+) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed =
+    value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed.slice(
+    0,
+    maxLength,
+  );
+}
+
+function serializeInvoice<
+  T extends {
+    totalAmount: MoneyValue;
+    paidAmount: MoneyValue;
+    remainingAmount: MoneyValue;
+    payments?: Array<
+      {
+        amount: MoneyValue;
+      } & Record<string, unknown>
+    >;
+  } & Record<string, unknown>,
+>(invoice: T) {
+  return {
+    ...invoice,
+
+    totalAmount:
+      moneyToNumber(
+        invoice.totalAmount,
+      ),
+
+    paidAmount:
+      moneyToNumber(
+        invoice.paidAmount,
+      ),
+
+    remainingAmount:
+      moneyToNumber(
+        invoice.remainingAmount,
+      ),
+
+    ...(invoice.payments
+      ? {
+          payments:
+            invoice.payments.map(
+              (payment) => ({
+                ...payment,
+                amount:
+                  moneyToNumber(
+                    payment.amount,
+                  ),
+              }),
+            ),
+        }
+      : {}),
+  };
+}
+
+export async function GET() {
+  try {
+    await requireApiAdmin();
+
+    const invoices =
+      await prisma.invoice.findMany({
+        include: {
+          client: true,
+
+          payments: {
+            orderBy: {
+              paymentDate: "desc",
+            },
+          },
+        },
+
+        orderBy: {
+          createdAt: "desc",
+        },
+      });
+
+    const serializedInvoices =
+      invoices.map(
+        (invoice) =>
+          serializeInvoice(
+            invoice,
+          ),
       );
 
-    let status: InvoiceStatus =
-      InvoiceStatus.PENDING;
+    return NextResponse.json(
+      serializedInvoices,
+      {
+        headers: {
+          "Cache-Control":
+            "no-store",
+        },
+      },
+    );
+  } catch (error) {
+    return apiError(
+      error,
+      "Failed to fetch invoices",
+    );
+  }
+}
+
+export async function POST(
+  req: Request,
+) {
+  try {
+    assertSameOrigin(req);
+
+    const admin =
+      await requireApiAdmin();
+
+    const body =
+      await parseJson(
+        req,
+        invoiceCreateSchema,
+      );
+
+    const totalCents =
+      toCents(
+        body.totalAmount,
+      );
+
+    const paidCents =
+      toCents(
+        body.paidAmount,
+      );
 
     if (
-      paid > 0 &&
-      paid < total
+      totalCents <= 0 ||
+      paidCents < 0 ||
+      paidCents > totalCents
     ) {
+      throw new ApiError(
+        400,
+        "Invalid invoice amounts",
+      );
+    }
+
+    const remainingCents =
+      totalCents -
+      paidCents;
+
+    let status:
+      InvoiceStatus;
+
+    if (paidCents === 0) {
+      status =
+        InvoiceStatus.PENDING;
+    } else if (
+      remainingCents === 0
+    ) {
+      status =
+        InvoiceStatus.PAID;
+    } else {
       status =
         InvoiceStatus.PARTIAL;
     }
 
-    if (paid >= total) {
-      status =
-        InvoiceStatus.PAID;
-    }
+    const ipAddress =
+      truncateOptional(
+        getClientIp(req),
+        MAX_IP_LENGTH,
+      );
+
+    const userAgent =
+      truncateOptional(
+        req.headers.get(
+          "user-agent",
+        ),
+        MAX_USER_AGENT_LENGTH,
+      );
 
     const invoice =
-      await prisma.invoice.create({
-        data: {
-          clientId:
-            clientId || null,
+      await prisma.$transaction(
+        async (tx) => {
+          /*
+           * Validate the referenced client inside the same transaction used
+           * for invoice creation so the reference cannot disappear between
+           * validation and persistence.
+           */
+          if (body.clientId) {
+            const client =
+              await tx.client.findUnique(
+                {
+                  where: {
+                    id:
+                      body.clientId,
+                  },
 
-          customerName:
-            customerName ||
-            null,
+                  select: {
+                    id: true,
+                  },
+                },
+              );
 
-          customerPhone:
-            customerPhone ||
-            null,
+            if (!client) {
+              throw new ApiError(
+                400,
+                "Invalid client",
+              );
+            }
+          }
 
-          title,
+          const created =
+            await tx.invoice.create(
+              {
+                data: {
+                  clientId:
+                    body.clientId ||
+                    null,
 
-          description,
+                  customerName:
+                    body.customerName ||
+                    null,
 
-          totalAmount:
-            total,
+                  customerPhone:
+                    body.customerPhone ||
+                    null,
 
-          paidAmount:
-            paid,
+                  title:
+                    body.title,
 
-          remainingAmount:
-            remaining,
+                  description:
+                    body.description ||
+                    null,
 
-          status,
+                  totalAmount:
+                    fromCents(
+                      totalCents,
+                    ),
 
-          paidAt:
-            status ===
-            InvoiceStatus.PAID
-              ? new Date()
-              : null,
+                  paidAmount:
+                    fromCents(
+                      paidCents,
+                    ),
+
+                  remainingAmount:
+                    fromCents(
+                      remainingCents,
+                    ),
+
+                  status,
+
+                  paidAt:
+                    status ===
+                    InvoiceStatus.PAID
+                      ? new Date()
+                      : null,
+                },
+
+                include: {
+                  client: true,
+                },
+              },
+            );
+
+          /*
+           * The invoice audit row is committed atomically with invoice
+           * creation. Customer phone/name and description are intentionally
+           * excluded from audit metadata.
+           */
+          await tx.auditLog.create({
+            data: {
+              actorUserId:
+                admin.userId,
+
+              action:
+                "INVOICE_CREATE",
+
+              entityType:
+                "Invoice",
+
+              entityId:
+                created.id,
+
+              metadata: {
+                clientId:
+                  body.clientId ||
+                  null,
+
+                title:
+                  created.title,
+
+                totalAmount:
+                  fromCents(
+                    totalCents,
+                  ),
+
+                paidAmount:
+                  fromCents(
+                    paidCents,
+                  ),
+
+                remainingAmount:
+                  fromCents(
+                    remainingCents,
+                  ),
+
+                status,
+              },
+
+              ipAddress,
+              userAgent,
+            },
+          });
+
+          /*
+           * Any opening paid amount must also exist in the durable payment
+           * ledger. The invoice, payment, and both audit rows are committed
+           * atomically.
+           */
+          if (paidCents > 0) {
+            const openingPayment =
+              await tx.invoicePayment.create(
+                {
+                  data: {
+                    invoiceId:
+                      created.id,
+
+                    amount:
+                      fromCents(
+                        paidCents,
+                      ),
+
+                    notes:
+                      "دفعة عند إنشاء الفاتورة",
+                  },
+                },
+              );
+
+            await tx.auditLog.create({
+              data: {
+                actorUserId:
+                  admin.userId,
+
+                action:
+                  "INVOICE_PAYMENT_CREATE",
+
+                entityType:
+                  "InvoicePayment",
+
+                entityId:
+                  openingPayment.id,
+
+                metadata: {
+                  invoiceId:
+                    created.id,
+
+                  amount:
+                    fromCents(
+                      paidCents,
+                    ),
+
+                  previousPaidAmount:
+                    0,
+
+                  newPaidAmount:
+                    fromCents(
+                      paidCents,
+                    ),
+
+                  previousRemainingAmount:
+                    fromCents(
+                      totalCents,
+                    ),
+
+                  newRemainingAmount:
+                    fromCents(
+                      remainingCents,
+                    ),
+
+                  previousStatus:
+                    InvoiceStatus.PENDING,
+
+                  newStatus:
+                    status,
+
+                  source:
+                    "INVOICE_OPENING_PAYMENT",
+                },
+
+                ipAddress,
+                userAgent,
+              },
+            });
+          }
+
+          return created;
         },
-      });
-
-    if (paid > 0) {
-      await prisma.invoicePayment.create({
-        data: {
-          invoiceId:
-            invoice.id,
-
-          amount: paid,
-
-          notes:
-            "دفعة عند إنشاء الفاتورة",
-        },
-      });
-    }
+      );
 
     return NextResponse.json(
-      invoice
+      serializeInvoice(
+        invoice,
+      ),
+      {
+        status: 201,
+        headers: {
+          "Cache-Control":
+            "no-store",
+        },
+      },
     );
   } catch (error) {
-    console.error(error);
-
-    return NextResponse.json(
-      {
-        error:
-          "Failed to create invoice",
-      },
-      {
-        status: 500,
-      }
+    return apiError(
+      error,
+      "Failed to create invoice",
     );
   }
 }

@@ -1,17 +1,20 @@
+import { requireAuth } from "@/lib/guards";
 export const dynamic = "force-dynamic";
 import { prisma } from "@/lib/prisma";
 import AddAppointmentModal from "@/components/appointments/AddAppointmentModal";
 import AppointmentsTable from "@/components/appointments/AppointmentsTable";
 
 export default async function AppointmentsPage() {
+  const currentUser = await requireAuth();
   const [appointments, employees, clients] =
     await Promise.all([
       prisma.appointment.findMany({
+        where: currentUser.role === "ADMIN" ? {} : { employeeId: currentUser.employeeId || "__none__" },
         include: {
           client: true,
           employee: {
             include: {
-              user: true,
+              user: { select: { id: true, name: true, email: true, role: true } },
             },
           },
         },
@@ -20,20 +23,20 @@ export default async function AppointmentsPage() {
         },
       }),
 
-      prisma.employee.findMany({
+      currentUser.role === "ADMIN" ? prisma.employee.findMany({
         include: {
-          user: true,
+          user: { select: { id: true, name: true, email: true, role: true } },
         },
         orderBy: {
           createdAt: "desc",
         },
-      }),
+      }) : Promise.resolve([]),
 
-      prisma.client.findMany({
+      currentUser.role === "ADMIN" ? prisma.client.findMany({
         orderBy: {
           name: "asc",
         },
-      }),
+      }) : Promise.resolve([]),
     ]);
 
   const totalAppointments =

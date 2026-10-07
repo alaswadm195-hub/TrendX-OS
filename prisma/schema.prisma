@@ -8,14 +8,47 @@ datasource db {
 }
 
 model User {
-  id           String    @id @default(cuid())
+  id           String        @id @default(cuid())
   name         String
-  email        String    @unique
+  email        String        @unique
   passwordHash String
-  role         UserRole  @default(EMPLOYEE)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  role         UserRole      @default(EMPLOYEE)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
   employee     Employee?
+  sessions     AuthSession[]
+  auditLogs    AuditLog[]
+}
+
+model AuthSession {
+  id        String    @id
+  userId    String
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorUserId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
 }
 
 model Employee {
@@ -24,16 +57,20 @@ model Employee {
   phone          String?
   whatsappNumber String?
   position       String?
-  salary         Float?
+  salary         Decimal?       @db.Decimal(14, 2)
   address        String?
   hireDate       DateTime?
   avatar         String?
   status         EmployeeStatus @default(ACTIVE)
+  archivedAt     DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   appointments   Appointment[]
   user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   tasks          Task[]
+
+  @@index([status])
+  @@index([archivedAt])
 }
 
 model Client {
@@ -43,22 +80,29 @@ model Client {
   email         String?
   company       String?
   notes         String?
+  archivedAt    DateTime?
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
   appointments  Appointment[]
   invoices      Invoice[]
   subscriptions Subscription[]
   tasks         Task[]
-  transactions  Transaction[]
+
+  @@index([phone])
+  @@index([createdAt])
+  @@index([archivedAt])
 }
 
 model Subscription {
   id              String             @id @default(cuid())
   clientId        String
+  serviceCategory ServiceCategory?
   planName        String
-  totalAmount     Float
-  paidAmount      Float              @default(0)
-  remainingAmount Float              @default(0)
+  includedMinutes Int?
+  completedAt     DateTime?
+  totalAmount     Decimal            @db.Decimal(14, 2)
+  paidAmount      Decimal            @default(0) @db.Decimal(14, 2)
+  remainingAmount Decimal            @default(0) @db.Decimal(14, 2)
   startDate       DateTime
   endDate         DateTime
   notes           String?
@@ -66,17 +110,89 @@ model Subscription {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   payments        Payment[]
-  client          Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  usageSessions   SubscriptionUsage[]
+  contentQuotas   SubscriptionContentQuota[]
+  contentItems    SubscriptionContentItem[]
+  client          Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@index([clientId])
+  @@index([serviceCategory])
+  @@index([includedMinutes])
+  @@index([completedAt])
+  @@index([status])
+  @@index([startDate, endDate])
+}
+
+
+
+model SubscriptionContentQuota {
+  id             String                  @id @default(cuid())
+  subscriptionId String
+  contentType    SubscriptionContentType
+  totalCount     Int
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  subscription   Subscription            @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@unique([subscriptionId, contentType])
+  @@index([subscriptionId])
+}
+
+model SubscriptionContentItem {
+  id             String                    @id @default(cuid())
+  subscriptionId String
+  contentType    SubscriptionContentType
+  status         SubscriptionContentStatus @default(PRODUCED)
+  producedAt     DateTime
+  editedAt       DateTime?
+  scheduledAt    DateTime?
+  publishedAt    DateTime?
+  notes          String?
+  archivedAt     DateTime?
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  subscription   Subscription              @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId])
+  @@index([contentType])
+  @@index([status])
+  @@index([producedAt])
+  @@index([archivedAt])
+  @@index([subscriptionId, archivedAt])
+}
+
+model SubscriptionUsage {
+  id              String       @id @default(cuid())
+  subscriptionId  String
+  startAt         DateTime
+  endAt           DateTime
+  durationMinutes Int
+  notes           String?
+  archivedAt      DateTime?
+  createdAt       DateTime     @default(now())
+  subscription    Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId])
+  @@index([startAt])
+  @@index([archivedAt])
+  @@index([subscriptionId, startAt])
+  @@index([subscriptionId, archivedAt])
 }
 
 model Payment {
-  id             String       @id @default(cuid())
-  subscriptionId String
-  amount         Float
-  notes          String?
-  paymentDate    DateTime     @default(now())
-  createdAt      DateTime     @default(now())
-  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  id              String        @id @default(cuid())
+  subscriptionId  String
+  amount          Decimal       @db.Decimal(14, 2)
+  paymentMethod   PaymentMethod @default(OTHER)
+  referenceNumber String?
+  notes           String?
+  paymentDate     DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+  subscription    Subscription  @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([subscriptionId])
+  @@index([paymentDate])
+  @@index([paymentMethod])
 }
 
 model Invoice {
@@ -86,34 +202,51 @@ model Invoice {
   customerPhone   String?
   title           String
   description     String?
-  totalAmount     Float
-  paidAmount      Float            @default(0)
-  remainingAmount Float            @default(0)
+  totalAmount     Decimal          @db.Decimal(14, 2)
+  paidAmount      Decimal          @default(0) @db.Decimal(14, 2)
+  remainingAmount Decimal          @default(0) @db.Decimal(14, 2)
   status          InvoiceStatus    @default(PENDING)
   paidAt          DateTime?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
-  client          Client?          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client          Client?          @relation(fields: [clientId], references: [id], onDelete: Restrict)
   payments        InvoicePayment[]
+
+  @@index([clientId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model InvoicePayment {
-  id          String   @id @default(cuid())
-  invoiceId   String
-  amount      Float
-  notes       String?
-  paymentDate DateTime @default(now())
-  createdAt   DateTime @default(now())
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  id              String        @id @default(cuid())
+  invoiceId       String
+  amount          Decimal       @db.Decimal(14, 2)
+  paymentMethod   PaymentMethod @default(OTHER)
+  referenceNumber String?
+  notes           String?
+  paymentDate     DateTime      @default(now())
+  createdAt       DateTime      @default(now())
+  invoice         Invoice       @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId])
+  @@index([paymentDate])
+  @@index([paymentMethod])
 }
 
 model Expense {
-  id          String   @id @default(cuid())
-  title       String
-  amount      Float
-  notes       String?
-  expenseDate DateTime @default(now())
-  createdAt   DateTime @default(now())
+  id              String          @id @default(cuid())
+  title           String
+  amount          Decimal         @db.Decimal(14, 2)
+  category        ExpenseCategory @default(OTHER)
+  paymentMethod   PaymentMethod   @default(OTHER)
+  referenceNumber String?
+  notes           String?
+  expenseDate     DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+
+  @@index([expenseDate])
+  @@index([category])
+  @@index([paymentMethod])
 }
 
 model Appointment {
@@ -131,8 +264,13 @@ model Appointment {
   endDate         DateTime?
   location        String?
   meetingLink     String?
-  client          Client            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  client          Client            @relation(fields: [clientId], references: [id], onDelete: Restrict)
   employee        Employee?         @relation(fields: [employeeId], references: [id])
+
+  @@index([clientId])
+  @@index([employeeId])
+  @@index([appointmentDate])
+  @@index([status])
 }
 
 model Task {
@@ -150,6 +288,11 @@ model Task {
   client      Client         @relation(fields: [clientId], references: [id])
   employee    Employee       @relation(fields: [employeeId], references: [id])
   activities  TaskActivity[]
+
+  @@index([clientId])
+  @@index([employeeId])
+  @@index([status])
+  @@index([dueDate])
 }
 
 model TaskActivity {
@@ -158,15 +301,8 @@ model TaskActivity {
   action    String
   createdAt DateTime @default(now())
   task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-}
 
-model Transaction {
-  id          String   @id @default(cuid())
-  clientId    String
-  amount      Float
-  description String?
-  createdAt   DateTime @default(now())
-  client      Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  @@index([taskId, createdAt])
 }
 
 enum UserRole {
@@ -199,6 +335,45 @@ enum TaskStatus {
 enum TaskPriority {
   URGENT
   ON_TIME
+}
+
+enum ServiceCategory {
+  PAGE_MANAGEMENT
+  SCREEN_PACKAGES
+  OUTDOOR_SHOOTING
+  INDOOR_SHOOTING
+}
+
+
+enum SubscriptionContentType {
+  REEL
+  DESIGN
+}
+
+enum SubscriptionContentStatus {
+  PRODUCED
+  EDITING
+  READY
+  SCHEDULED
+  PUBLISHED
+}
+
+enum PaymentMethod {
+  CASH
+  INSTAPAY
+  BANK_TRANSFER
+  VODAFONE_CASH
+  OTHER
+}
+
+enum ExpenseCategory {
+  SALARIES
+  RENT
+  ADS
+  EQUIPMENT
+  TRANSPORT
+  PURCHASES
+  OTHER
 }
 
 enum SubscriptionStatus {

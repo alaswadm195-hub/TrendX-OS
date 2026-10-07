@@ -4,10 +4,14 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import TaskStatusSelect from "./TaskStatusSelect";
 
+type TaskRow = {
+  id: string; title: string; description?: string | null; dueDate: string | Date; status: string; priority?: string; client?: { name?: string } | null; employee?: { user?: { name?: string } } | null;
+};
+
 export default function TasksTable({
   tasks,
 }: {
-  tasks: any[];
+  tasks: TaskRow[];
 }) {
   const [filter, setFilter] = useState("TODAY");
 
@@ -45,7 +49,7 @@ export default function TasksTable({
           return true;
       }
     });
-  }, [tasks, filter]);
+  }, [tasks, filter, today, tomorrow]);
 
   return (
     <>

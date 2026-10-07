@@ -27,7 +27,7 @@ export default async function TasksPage() {
         include: {
           employee: {
             include: {
-              user: true,
+              user: { select: { id: true, name: true, email: true, role: true } },
             },
           },
           client: true,
@@ -37,20 +37,20 @@ export default async function TasksPage() {
         },
       }),
 
-      prisma.employee.findMany({
+      currentUser.role === "ADMIN" ? prisma.employee.findMany({
         include: {
-          user: true,
+          user: { select: { id: true, name: true, email: true, role: true } },
         },
         orderBy: {
           createdAt: "desc",
         },
-      }),
+      }) : Promise.resolve([]),
 
-      prisma.client.findMany({
+      currentUser.role === "ADMIN" ? prisma.client.findMany({
         orderBy: {
           name: "asc",
         },
-      }),
+      }) : Promise.resolve([]),
     ]);
 
   const totalTasks = tasks.length;

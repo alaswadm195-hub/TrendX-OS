@@ -1,173 +1,122 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
+
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/current-user";
+import {
+  ApiError,
+  apiError,
+  assertSameOrigin,
+  safeUserSelect,
+} from "@/lib/api-security";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
+
+const taskActionSchema = z
+  .object({
+    action: z.enum(["START", "SUBMIT_REVIEW", "APPROVE", "RETURN"]),
+  })
+  .strict();
+
+type TaskAction = z.infer<typeof taskActionSchema>["action"];
+
+const EMPLOYEE_ACTIONS: TaskAction[] = ["START", "SUBMIT_REVIEW"];
 
 export async function PATCH(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    assertSameOrigin(req);
+
     const currentUser = await getCurrentUser();
 
     if (!currentUser) {
-      return NextResponse.json(
-        {
-          error: "Unauthorized",
-        },
-        {
-          status: 401,
-        }
-      );
+      throw new ApiError(401, "Unauthorized");
+    }
+
+    if (currentUser.role === "EMPLOYEE" && !currentUser.employeeId) {
+      throw new ApiError(403, "Forbidden");
     }
 
     const { id } = await params;
-    const body = await req.json();
 
-    const task = await prisma.task.findUnique({
-      where: {
-        id,
-      },
+    let rawBody: unknown;
+
+    try {
+      rawBody = await req.json();
+    } catch {
+      throw new ApiError(400, "Invalid JSON");
+    }
+
+    const parsedBody = taskActionSchema.safeParse(rawBody);
+
+    if (!parsedBody.success) {
+      throw new ApiError(400, "Invalid request data");
+    }
+
+    const { action } = parsedBody.data;
+
+    if (
+      currentUser.role === "EMPLOYEE" &&
+      !EMPLOYEE_ACTIONS.includes(action)
+    ) {
+      throw new ApiError(403, "Forbidden");
+    }
+
+    /*
+     * IDOR / ownership protection:
+     * - Admin can access any task.
+     * - Employee can access only a task assigned to their own employeeId.
+     *
+     * Ownership is enforced inside the database query itself, so we do not
+     * fetch another employee's task and then decide whether to expose it.
+     */
+    const task = await prisma.task.findFirst({
+      where:
+        currentUser.role === "ADMIN"
+          ? { id }
+          : {
+              id,
+              employeeId: currentUser.employeeId!,
+            },
       include: {
         employee: {
           include: {
-            user: true,
+            user: {
+              select: safeUserSelect,
+            },
           },
         },
         client: true,
       },
     });
 
+    /*
+     * Returning 404 for a resource outside the employee's scope avoids
+     * confirming whether another employee's task ID exists.
+     */
     if (!task) {
-      return NextResponse.json(
-        {
-          error: "Task not found",
-        },
-        {
-          status: 404,
-        }
-      );
+      throw new ApiError(404, "Task not found");
     }
 
-    /*
-     * الموظف لا يستطيع التعامل
-     * إلا مع المهام المسندة إليه
-     */
-
-    if (
-      currentUser.role === "EMPLOYEE" &&
-      task.employeeId !== currentUser.employeeId
-    ) {
-      return NextResponse.json(
-        {
-          error: "Forbidden",
-        },
-        {
-          status: 403,
-        }
-      );
-    }
-
-    /*
-     * الموظف مسموح له فقط:
-     * START
-     * SUBMIT_REVIEW
-     */
-
-    if (currentUser.role === "EMPLOYEE") {
-      const allowedActions = [
-        "START",
-        "SUBMIT_REVIEW",
-      ];
-
-      if (!allowedActions.includes(body.action)) {
-        return NextResponse.json(
-          {
-            error:
-              "You are not allowed to perform this action",
-          },
-          {
-            status: 403,
-          }
-        );
-      }
-    }
-
-    /*
-     * الأدمن فقط:
-     * APPROVE
-     * RETURN
-     */
-
-    if (
-      ["APPROVE", "RETURN"].includes(body.action) &&
-      currentUser.role !== "ADMIN"
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Only admins can perform this action",
-        },
-        {
-          status: 403,
-        }
-      );
-    }
-
-    /*
-     * أرقام WhatsApp
-     *
-     * رقم الشركة هو الحساب المتصل بخدمة WhatsApp.
-     *
-     * ADMIN_WHATSAPP_NUMBER:
-     * الرقم الذي يستقبل إشعارات الموظفين.
-     *
-     * employee.phone:
-     * رقم الموظف الذي يستقبل إشعارات
-     * الاعتماد أو الإرجاع.
-     */
-
-    const adminWhatsApp =
-      process.env.ADMIN_WHATSAPP_NUMBER || "";
+    const adminWhatsApp = process.env.ADMIN_WHATSAPP_NUMBER || "";
 
     let newStatus = task.status;
-
     let activity = "";
-
     let whatsappMessage = "";
-
     let whatsappReceiver = "";
 
-    /*
-     * =========================
-     * START
-     * =========================
-     *
-     * الموظف بدأ تنفيذ المهمة
-     *
-     * الرسالة:
-     * رقم الشركة → الأدمن
-     */
-
-    switch (body.action) {
+    switch (action) {
       case "START": {
         if (task.status !== "TODO") {
-          return NextResponse.json(
-            {
-              error:
-                "Task cannot be started from its current status",
-            },
-            {
-              status: 400,
-            }
+          throw new ApiError(
+            409,
+            "Task cannot be started from its current status",
           );
         }
 
         newStatus = "IN_PROGRESS";
-
-        activity =
-          `${task.employee.user.name} بدأ تنفيذ المهمة`;
-
+        activity = `${task.employee.user.name} بدأ تنفيذ المهمة`;
         whatsappReceiver = adminWhatsApp;
 
         whatsappMessage = `🚀 بدأ تنفيذ مهمة
@@ -182,9 +131,7 @@ ${task.title}
 ${task.client.name}
 
 📅 موعد التسليم:
-${new Date(
-  task.dueDate
-).toLocaleDateString("ar-EG")}
+${new Date(task.dueDate).toLocaleDateString("ar-EG")}
 
 بدأ الموظف تنفيذ المهمة الآن.
 
@@ -193,35 +140,16 @@ TrendX OS`;
         break;
       }
 
-      /*
-       * =========================
-       * SUBMIT REVIEW
-       * =========================
-       *
-       * الموظف سلّم المهمة للمراجعة
-       *
-       * الرسالة:
-       * رقم الشركة → الأدمن
-       */
-
       case "SUBMIT_REVIEW": {
         if (task.status !== "IN_PROGRESS") {
-          return NextResponse.json(
-            {
-              error:
-                "Task must be in progress before submitting for review",
-            },
-            {
-              status: 400,
-            }
+          throw new ApiError(
+            409,
+            "Task must be in progress before submitting for review",
           );
         }
 
         newStatus = "REVIEW";
-
-        activity =
-          `${task.employee.user.name} أرسل المهمة للمراجعة`;
-
+        activity = `${task.employee.user.name} أرسل المهمة للمراجعة`;
         whatsappReceiver = adminWhatsApp;
 
         whatsappMessage = `📤 مهمة جاهزة للمراجعة
@@ -236,9 +164,7 @@ ${task.title}
 ${task.client.name}
 
 📅 موعد التسليم:
-${new Date(
-  task.dueDate
-).toLocaleDateString("ar-EG")}
+${new Date(task.dueDate).toLocaleDateString("ar-EG")}
 
 تم تسليم المهمة للمراجعة.
 
@@ -249,36 +175,21 @@ TrendX OS`;
         break;
       }
 
-      /*
-       * =========================
-       * APPROVE
-       * =========================
-       *
-       * الأدمن اعتمد المهمة
-       *
-       * الرسالة:
-       * رقم الشركة → الموظف
-       */
-
       case "APPROVE": {
+        if (currentUser.role !== "ADMIN") {
+          throw new ApiError(403, "Forbidden");
+        }
+
         if (task.status !== "REVIEW") {
-          return NextResponse.json(
-            {
-              error:
-                "Task must be under review before approval",
-            },
-            {
-              status: 400,
-            }
+          throw new ApiError(
+            409,
+            "Task must be under review before approval",
           );
         }
 
         newStatus = "DONE";
-
         activity = "تم اعتماد المهمة";
-
-        whatsappReceiver =
-          task.employee.phone || "";
+        whatsappReceiver = task.employee.phone || "";
 
         whatsappMessage = `✅ تم اعتماد المهمة
 
@@ -300,37 +211,21 @@ TrendX OS`;
         break;
       }
 
-      /*
-       * =========================
-       * RETURN
-       * =========================
-       *
-       * الأدمن رجّع المهمة للتعديل
-       *
-       * الرسالة:
-       * رقم الشركة → الموظف
-       */
-
       case "RETURN": {
+        if (currentUser.role !== "ADMIN") {
+          throw new ApiError(403, "Forbidden");
+        }
+
         if (task.status !== "REVIEW") {
-          return NextResponse.json(
-            {
-              error:
-                "Task must be under review before returning",
-            },
-            {
-              status: 400,
-            }
+          throw new ApiError(
+            409,
+            "Task must be under review before returning",
           );
         }
 
         newStatus = "IN_PROGRESS";
-
-        activity =
-          "تمت إعادة المهمة للتنفيذ";
-
-        whatsappReceiver =
-          task.employee.phone || "";
+        activity = "تمت إعادة المهمة للتنفيذ";
+        whatsappReceiver = task.employee.phone || "";
 
         whatsappMessage = `↩️ تم إرجاع المهمة للتعديل
 
@@ -351,202 +246,123 @@ TrendX OS`;
 
         break;
       }
-
-      default:
-        return NextResponse.json(
-          {
-            error: "Invalid action",
-          },
-          {
-            status: 400,
-          }
-        );
     }
 
     /*
-     * =========================
-     * تحديث المهمة
-     * =========================
+     * Update + activity must succeed together.
+     * The old status is included in updateMany to prevent concurrent requests
+     * from applying two workflow transitions from the same stale state.
      */
-
-    const updatedTask =
-      await prisma.task.update({
+    const updatedTask = await prisma.$transaction(async (tx) => {
+      const updateResult = await tx.task.updateMany({
         where: {
-          id,
+          id: task.id,
+          status: task.status,
         },
-
         data: {
           status: newStatus,
         },
       });
 
-    /*
-     * =========================
-     * تسجيل النشاط
-     * =========================
-     */
+      if (updateResult.count !== 1) {
+        throw new ApiError(
+          409,
+          "Task status changed. Refresh and try again",
+        );
+      }
 
-    await prisma.taskActivity.create({
-      data: {
-        taskId: id,
-        action: activity,
-      },
+      await tx.taskActivity.create({
+        data: {
+          taskId: task.id,
+          action: activity,
+        },
+      });
+
+      const updated = await tx.task.findUnique({
+        where: {
+          id: task.id,
+        },
+      });
+
+      if (!updated) {
+        throw new ApiError(404, "Task not found");
+      }
+
+      return updated;
     });
 
     /*
-     * =========================
-     * إرسال WhatsApp
-     * =========================
-     *
-     * كل الرسائل تخرج من رقم الشركة
-     * المتصل بـ WhatsApp Service.
-     *
-     * المستلم يتغير حسب الحدث:
-     *
-     * START          → ADMIN
-     * SUBMIT_REVIEW  → ADMIN
-     * APPROVE        → EMPLOYEE
-     * RETURN         → EMPLOYEE
+     * WhatsApp is deliberately outside the transaction. A notification outage
+     * must not roll back a valid workflow change in the database.
      */
-
-    try {
-      if (
-        whatsappReceiver &&
-        whatsappMessage
-      ) {
+    if (whatsappReceiver && whatsappMessage) {
+      try {
         await sendWhatsAppMessage({
           to: whatsappReceiver,
           message: whatsappMessage,
         });
 
-        console.log(
-          "📱 Workflow WhatsApp sent successfully"
+        console.info("WhatsApp task workflow notification sent");
+      } catch (whatsappError) {
+        console.error(
+          "WhatsApp task workflow notification failed",
+          whatsappError,
         );
-
-        console.log(
-          "📤 Receiver:",
-          whatsappReceiver
-        );
-      } else {
-        console.log(
-          "⚠️ WhatsApp notification skipped"
-        );
-
-        if (!whatsappReceiver) {
-          console.log(
-            "⚠️ WhatsApp receiver is missing"
-          );
-        }
       }
-    } catch (whatsappError) {
-      /*
-       * لو WhatsApp فشل،
-       * المهمة نفسها تفضل اتحدثت عادي.
-       */
-
-      console.error(
-        "❌ Workflow WhatsApp Error:",
-        whatsappError
-      );
     }
 
-    return NextResponse.json(
-      updatedTask
-    );
+    return NextResponse.json(updatedTask);
   } catch (error) {
-    console.error(error);
-
-    return NextResponse.json(
-      {
-        error:
-          "Failed to update task",
-      },
-      {
-        status: 500,
-      }
-    );
+    return apiError(error, "Failed to update task");
   }
 }
 
 export async function DELETE(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const currentUser =
-      await getCurrentUser();
+    assertSameOrigin(req);
+
+    const currentUser = await getCurrentUser();
 
     if (!currentUser) {
-      return NextResponse.json(
-        {
-          error: "Unauthorized",
-        },
-        {
-          status: 401,
-        }
-      );
+      throw new ApiError(401, "Unauthorized");
     }
 
     if (currentUser.role !== "ADMIN") {
-      return NextResponse.json(
-        {
-          error:
-            "Only admins can delete tasks",
-        },
-        {
-          status: 403,
-        }
-      );
+      throw new ApiError(403, "Forbidden");
     }
 
     const { id } = await params;
 
-    const task =
-      await prisma.task.findUnique({
+    await prisma.$transaction(async (tx) => {
+      /*
+       * Delete dependent activity rows first so this works even if the current
+       * database relation is not configured with ON DELETE CASCADE.
+       */
+      await tx.taskActivity.deleteMany({
+        where: {
+          taskId: id,
+        },
+      });
+
+      const deleted = await tx.task.deleteMany({
         where: {
           id,
         },
       });
 
-    if (!task) {
-      return NextResponse.json(
-        {
-          error: "Task not found",
-        },
-        {
-          status: 404,
-        }
-      );
-    }
-
-    await prisma.taskActivity.deleteMany({
-      where: {
-        taskId: id,
-      },
-    });
-
-    await prisma.task.delete({
-      where: {
-        id,
-      },
+      if (deleted.count !== 1) {
+        throw new ApiError(404, "Task not found");
+      }
     });
 
     return NextResponse.json({
       success: true,
-      message:
-        "Task deleted successfully",
+      message: "Task deleted successfully",
     });
   } catch (error) {
-    console.error(error);
-
-    return NextResponse.json(
-      {
-        error:
-          "Failed to delete task",
-      },
-      {
-        status: 500,
-      }
-    );
+    return apiError(error, "Failed to delete task");
   }
 }

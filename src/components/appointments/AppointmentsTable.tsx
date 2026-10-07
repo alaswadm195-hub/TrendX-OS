@@ -4,10 +4,14 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+type AppointmentRow = {
+  id: string; title?: string; appointmentDate: string | Date; status: string; customerName?: string | null; location?: string | null; client?: { name?: string } | null; employee?: { user?: { name?: string } } | null;
+};
+
 export default function AppointmentsTable({
   appointments,
 }: {
-  appointments: any[];
+  appointments: AppointmentRow[];
 }) {
   const router = useRouter();
 
@@ -62,7 +66,7 @@ export default function AppointmentsTable({
           }
         }
       );
-    }, [appointments, filter]);
+    }, [appointments, filter, today, tomorrow]);
 
   async function deleteAppointment(
     id: string

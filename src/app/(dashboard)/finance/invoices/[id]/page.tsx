@@ -1,6 +1,9 @@
-import AddPaymentModal from "@/components/finance/AddPaymentModal";
-import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
+
+import { prisma } from "@/lib/prisma";
+import { requireAdmin } from "@/lib/guards";
+
+import AddPaymentModal from "@/components/finance/AddPaymentModal";
 
 type Props = {
   params: Promise<{
@@ -8,18 +11,62 @@ type Props = {
   }>;
 };
 
+type MoneyValue =
+  | number
+  | {
+      toString(): string;
+    };
+
+function moneyToNumber(
+  value: MoneyValue,
+) {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : Number(value.toString());
+
+  if (!Number.isFinite(numericValue)) {
+    throw new Error(
+      "Invalid monetary value",
+    );
+  }
+
+  return numericValue;
+}
+
 export default async function InvoiceDetailsPage({
   params,
 }: Props) {
-  const { id } = await params;
+  await requireAdmin();
 
-  const invoice =
+  const { id } =
+    await params;
+
+  const rawInvoice =
     await prisma.invoice.findUnique({
       where: {
         id,
       },
-      include: {
+
+      select: {
+        id: true,
+        customerName: true,
+        customerPhone: true,
+        title: true,
+        totalAmount: true,
+        paidAmount: true,
+        remainingAmount: true,
+        status: true,
+        createdAt: true,
+
         payments: {
+          select: {
+            id: true,
+            amount: true,
+            notes: true,
+            paymentDate: true,
+          },
+
           orderBy: {
             paymentDate: "desc",
           },
@@ -27,9 +74,49 @@ export default async function InvoiceDetailsPage({
       },
     });
 
-  if (!invoice) {
+  if (!rawInvoice) {
     notFound();
   }
+
+  /*
+   * Normalize current Float values and future Prisma.Decimal values to plain
+   * numbers before rendering them in React or passing them to client code.
+   */
+  const invoice = {
+    ...rawInvoice,
+
+    totalAmount:
+      moneyToNumber(
+        rawInvoice.totalAmount,
+      ),
+
+    paidAmount:
+      moneyToNumber(
+        rawInvoice.paidAmount,
+      ),
+
+    remainingAmount:
+      moneyToNumber(
+        rawInvoice.remainingAmount,
+      ),
+
+    payments:
+      rawInvoice.payments.map(
+        (payment) => ({
+          ...payment,
+
+          amount:
+            moneyToNumber(
+              payment.amount,
+            ),
+        }),
+      ),
+  };
+
+  const canAddPayment =
+    invoice.status !== "PAID" &&
+    invoice.status !== "CANCELLED" &&
+    invoice.remainingAmount > 0;
 
   return (
     <div className="p-6 lg:p-8">
@@ -77,9 +164,7 @@ export default async function InvoiceDetailsPage({
             </p>
 
             <p className="font-semibold mt-1">
-              {new Date(
-                invoice.createdAt
-              ).toLocaleString(
+              {invoice.createdAt.toLocaleString(
                 "ar-EG",
                 {
                   year: "numeric",
@@ -87,7 +172,7 @@ export default async function InvoiceDetailsPage({
                   day: "2-digit",
                   hour: "2-digit",
                   minute: "2-digit",
-                }
+                },
               )}
             </p>
           </div>
@@ -101,7 +186,10 @@ export default async function InvoiceDetailsPage({
           </p>
 
           <h3 className="text-3xl font-bold mt-2">
-            {invoice.totalAmount} ج
+            {invoice.totalAmount.toLocaleString(
+              "ar-EG",
+            )}{" "}
+            ج
           </h3>
         </div>
 
@@ -111,7 +199,10 @@ export default async function InvoiceDetailsPage({
           </p>
 
           <h3 className="text-3xl font-bold mt-2 text-green-600">
-            {invoice.paidAmount} ج
+            {invoice.paidAmount.toLocaleString(
+              "ar-EG",
+            )}{" "}
+            ج
           </h3>
         </div>
 
@@ -121,7 +212,10 @@ export default async function InvoiceDetailsPage({
           </p>
 
           <h3 className="text-3xl font-bold mt-2 text-orange-500">
-            {invoice.remainingAmount} ج
+            {invoice.remainingAmount.toLocaleString(
+              "ar-EG",
+            )}{" "}
+            ج
           </h3>
         </div>
       </div>
@@ -132,8 +226,7 @@ export default async function InvoiceDetailsPage({
             سجل الدفعات
           </h2>
 
-          {invoice.status !==
-            "PAID" && (
+          {canAddPayment && (
             <AddPaymentModal
               invoiceId={
                 invoice.id
@@ -148,68 +241,68 @@ export default async function InvoiceDetailsPage({
             لا توجد دفعات
           </div>
         ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b bg-slate-50">
-                <th className="text-right p-4">
-                  التاريخ والوقت
-                </th>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b bg-slate-50">
+                  <th className="text-right p-4">
+                    التاريخ والوقت
+                  </th>
 
-                <th className="text-right p-4">
-                  المبلغ
-                </th>
+                  <th className="text-right p-4">
+                    المبلغ
+                  </th>
 
-                <th className="text-right p-4">
-                  الملاحظات
-                </th>
-              </tr>
-            </thead>
+                  <th className="text-right p-4">
+                    الملاحظات
+                  </th>
+                </tr>
+              </thead>
 
-            <tbody>
-              {invoice.payments.map(
-                (payment) => (
-                  <tr
-                    key={
-                      payment.id
-                    }
-                    className="border-b"
-                  >
-                    <td className="p-4">
-                      {new Date(
-                        payment.paymentDate
-                      ).toLocaleString(
-                        "ar-EG",
-                        {
-                          year:
-                            "numeric",
-                          month:
-                            "2-digit",
-                          day:
-                            "2-digit",
-                          hour:
-                            "2-digit",
-                          minute:
-                            "2-digit",
-                        }
-                      )}
-                    </td>
+              <tbody>
+                {invoice.payments.map(
+                  (payment) => (
+                    <tr
+                      key={
+                        payment.id
+                      }
+                      className="border-b"
+                    >
+                      <td className="p-4">
+                        {payment.paymentDate.toLocaleString(
+                          "ar-EG",
+                          {
+                            year:
+                              "numeric",
+                            month:
+                              "2-digit",
+                            day:
+                              "2-digit",
+                            hour:
+                              "2-digit",
+                            minute:
+                              "2-digit",
+                          },
+                        )}
+                      </td>
 
-                    <td className="p-4 text-green-600 font-semibold">
-                      {
-                        payment.amount
-                      }{" "}
-                      ج
-                    </td>
+                      <td className="p-4 text-green-600 font-semibold">
+                        {payment.amount.toLocaleString(
+                          "ar-EG",
+                        )}{" "}
+                        ج
+                      </td>
 
-                    <td className="p-4">
-                      {payment.notes ||
-                        "-"}
-                    </td>
-                  </tr>
-                )
-              )}
-            </tbody>
-          </table>
+                      <td className="p-4">
+                        {payment.notes ||
+                          "-"}
+                      </td>
+                    </tr>
+                  ),
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>

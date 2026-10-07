@@ -1,28 +1,74 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
+
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/current-user";
+import {
+  ApiError,
+  apiError,
+  assertSameOrigin,
+  safeUserSelect,
+} from "@/lib/api-security";
 import { sendTaskEmail } from "@/lib/email";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
+
+function isSafeHttpUrl(value: string) {
+  if (!value) {
+    return true;
+  }
+
+  try {
+    const url = new URL(value);
+
+    return (
+      url.protocol === "http:" ||
+      url.protocol === "https:"
+    );
+  } catch {
+    return false;
+  }
+}
+
+const taskCreateSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    description: z.string().trim().max(5000).optional().nullable(),
+    clientId: z.string().cuid(),
+    employeeId: z.string().cuid(),
+    dueDate: z
+      .string()
+      .min(1)
+      .refine((value) => !Number.isNaN(Date.parse(value)), "Invalid date"),
+    fileUrl: z
+      .string()
+      .trim()
+      .max(2000)
+      .refine(
+        isSafeHttpUrl,
+        "File URL must use http or https",
+      )
+      .optional()
+      .nullable(),
+    priority: z.enum(["URGENT", "ON_TIME"]).optional().default("ON_TIME"),
+  })
+  .strict();
 
 export async function GET() {
   try {
     const currentUser = await getCurrentUser();
 
     if (!currentUser) {
-      return NextResponse.json(
-        {
-          error: "Unauthorized",
-        },
-        {
-          status: 401,
-        }
-      );
+      throw new ApiError(401, "Unauthorized");
+    }
+
+    if (currentUser.role === "EMPLOYEE" && !currentUser.employeeId) {
+      throw new ApiError(403, "Forbidden");
     }
 
     const tasks = await prisma.task.findMany({
       where:
         currentUser.role === "ADMIN"
-          ? {}
+          ? undefined
           : {
               employeeId: currentUser.employeeId!,
             },
@@ -30,11 +76,19 @@ export async function GET() {
       include: {
         employee: {
           include: {
-            user: true,
+            user: {
+              select: safeUserSelect,
+            },
           },
         },
+
         client: true,
-        activities: true,
+
+        activities: {
+          orderBy: {
+            createdAt: "desc",
+          },
+        },
       },
 
       orderBy: {
@@ -42,180 +96,130 @@ export async function GET() {
       },
     });
 
-    return NextResponse.json(tasks);
-  } catch (error) {
-    console.error(error);
-
-    return NextResponse.json(
-      {
-        error: "Failed to fetch tasks",
+    return NextResponse.json(tasks, {
+      headers: {
+        "Cache-Control": "no-store",
       },
-      {
-        status: 500,
-      }
-    );
+    });
+  } catch (error) {
+    return apiError(error, "Failed to fetch tasks");
   }
 }
 
 export async function POST(req: Request) {
   try {
+    assertSameOrigin(req);
+
     const currentUser = await getCurrentUser();
 
     if (!currentUser) {
-      return NextResponse.json(
-        {
-          error: "Unauthorized",
-        },
-        {
-          status: 401,
-        }
-      );
+      throw new ApiError(401, "Unauthorized");
     }
 
     if (currentUser.role !== "ADMIN") {
-      return NextResponse.json(
-        {
-          error: "Only admins can create tasks",
-        },
-        {
-          status: 403,
-        }
-      );
+      throw new ApiError(403, "Forbidden");
     }
 
-    const body = await req.json();
+    let rawBody: unknown;
 
-    if (!body.title) {
-      return NextResponse.json(
-        {
-          error: "Title is required",
-        },
-        {
-          status: 400,
-        }
-      );
+    try {
+      rawBody = await req.json();
+    } catch {
+      throw new ApiError(400, "Invalid JSON");
     }
 
-    if (!body.clientId) {
-      return NextResponse.json(
-        {
-          error: "Client is required",
-        },
-        {
-          status: 400,
-        }
-      );
+    const parsed = taskCreateSchema.safeParse(rawBody);
+
+    if (!parsed.success) {
+      throw new ApiError(400, "Invalid request data");
     }
 
-    if (!body.employeeId) {
-      return NextResponse.json(
-        {
-          error: "Employee is required",
+    const body = parsed.data;
+
+    const dueDate = new Date(body.dueDate);
+
+    const [client, employee] = await Promise.all([
+      prisma.client.findUnique({
+        where: {
+          id: body.clientId,
         },
-        {
-          status: 400,
-        }
-      );
+        select: {
+          id: true,
+        },
+      }),
+
+      prisma.employee.findUnique({
+        where: {
+          id: body.employeeId,
+        },
+        select: {
+          id: true,
+          status: true,
+        },
+      }),
+    ]);
+
+    if (!client) {
+      throw new ApiError(400, "Invalid client");
     }
 
-    if (!body.dueDate) {
-      return NextResponse.json(
-        {
-          error: "Due date is required",
-        },
-        {
-          status: 400,
-        }
-      );
+    if (!employee) {
+      throw new ApiError(400, "Invalid employee");
     }
 
-    const task = await prisma.task.create({
-      data: {
-        title: body.title,
+    if (employee.status === "SUSPENDED") {
+      throw new ApiError(409, "Cannot assign tasks to a suspended employee");
+    }
 
-        description:
-          body.description || null,
+    const task = await prisma.$transaction(async (tx) => {
+      const createdTask = await tx.task.create({
+        data: {
+          title: body.title,
+          description: body.description || null,
+          clientId: body.clientId,
+          employeeId: body.employeeId,
+          dueDate,
+          fileUrl: body.fileUrl || null,
+          priority: body.priority,
+          status: "TODO",
+        },
 
-        clientId:
-          body.clientId,
-
-        employeeId:
-          body.employeeId,
-
-        dueDate: new Date(
-          body.dueDate
-        ),
-
-        fileUrl:
-          body.fileUrl || null,
-
-        priority:
-          body.priority || "ON_TIME",
-
-        status: "TODO",
-      },
-
-      include: {
-        employee: {
-          include: {
-            user: true,
+        include: {
+          employee: {
+            include: {
+              user: {
+                select: safeUserSelect,
+              },
+            },
           },
+
+          client: true,
         },
+      });
 
-        client: true,
-      },
+      await tx.taskActivity.create({
+        data: {
+          taskId: createdTask.id,
+          action: `تم إنشاء المهمة وإسنادها إلى ${createdTask.employee.user.name}`,
+        },
+      });
+
+      return createdTask;
     });
-
-    /*
-     * تسجيل إنشاء المهمة
-     */
-
-    await prisma.taskActivity.create({
-      data: {
-        taskId: task.id,
-
-        action: `تم إنشاء المهمة وإسنادها إلى ${task.employee.user.name}`,
-      },
-    });
-
-    /*
-     * إرسال Email للموظف
-     */
 
     try {
       await sendTaskEmail({
         to: task.employee.user.email,
-
-        employeeName:
-          task.employee.user.name,
-
-        taskTitle:
-          task.title,
-
-        clientName:
-          task.client.name,
-
-        dueDate:
-          new Date(
-            task.dueDate
-          ).toLocaleDateString(
-            "ar-EG"
-          ),
+        employeeName: task.employee.user.name,
+        taskTitle: task.title,
+        clientName: task.client.name,
+        dueDate: new Date(task.dueDate).toLocaleDateString("ar-EG"),
       });
 
-      console.log(
-        `📧 Task email sent to ${task.employee.user.email}`
-      );
+      console.info("Task email notification sent");
     } catch (emailError) {
-      console.error(
-        "Email Error:",
-        emailError
-      );
+      console.error("Task email notification failed", emailError);
     }
-
-    /*
-     * إرسال WhatsApp للموظف
-     */
 
     try {
       if (task.employee.phone) {
@@ -234,50 +238,29 @@ ${task.title}
 ${task.client.name}
 
 📅 موعد التسليم:
-${new Date(
-  task.dueDate
-).toLocaleDateString("ar-EG")}
+${new Date(task.dueDate).toLocaleDateString("ar-EG")}
 
 ⚡ الأولوية:
-${
-  task.priority === "URGENT"
-    ? "مستعجلة 🔥"
-    : "تسليم في موعدها"
-}
+${task.priority === "URGENT" ? "مستعجلة 🔥" : "تسليم في موعدها"}
 
 يرجى الدخول إلى TrendX OS لمراجعة تفاصيل المهمة.`,
         });
 
-        console.log(
-          `📱 WhatsApp task notification sent to ${task.employee.phone}`
-        );
+        console.info("Task WhatsApp notification sent");
       } else {
-        console.log(
-          "⚠️ Employee has no phone number"
-        );
+        console.info("Task WhatsApp notification skipped: employee has no phone");
       }
     } catch (whatsappError) {
-      console.error(
-        "WhatsApp Error:",
-        whatsappError
-      );
+      console.error("Task WhatsApp notification failed", whatsappError);
     }
 
-    /*
-     * إرجاع المهمة
-     */
-
-    return NextResponse.json(task);
-  } catch (error) {
-    console.error(error);
-
-    return NextResponse.json(
-      {
-        error: "Failed to create task",
+    return NextResponse.json(task, {
+      status: 201,
+      headers: {
+        "Cache-Control": "no-store",
       },
-      {
-        status: 500,
-      }
-    );
+    });
+  } catch (error) {
+    return apiError(error, "Failed to create task");
   }
 }

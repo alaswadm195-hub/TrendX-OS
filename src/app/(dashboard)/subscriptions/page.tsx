@@ -1,4 +1,6 @@
+import { requireAdmin } from "@/lib/guards";
 import { prisma } from "@/lib/prisma";
+
 import SubscriptionsTable from "@/components/subscriptions/SubscriptionsTable";
 import AddSubscriptionModal from "@/components/subscriptions/AddSubscriptionModal";
 import MonthSelector from "@/components/subscriptions/MonthSelector";
@@ -16,61 +18,152 @@ type SearchParams = Promise<{
   month?: string;
 }>;
 
+type MoneyValue =
+  | number
+  | {
+      toString(): string;
+    };
+
+function moneyToNumber(
+  value: MoneyValue,
+) {
+  const numericValue =
+    typeof value === "number"
+      ? value
+      : Number(value.toString());
+
+  if (!Number.isFinite(numericValue)) {
+    throw new Error(
+      "Invalid monetary value",
+    );
+  }
+
+  return numericValue;
+}
+
+function toCents(
+  value: MoneyValue,
+) {
+  const numericValue =
+    moneyToNumber(value);
+
+  const cents =
+    Math.round(
+      numericValue * 100,
+    );
+
+  if (!Number.isSafeInteger(cents)) {
+    throw new Error(
+      "Monetary value is out of range",
+    );
+  }
+
+  return cents;
+}
+
+function fromCents(
+  cents: number,
+) {
+  if (!Number.isSafeInteger(cents)) {
+    throw new Error(
+      "Monetary total is out of range",
+    );
+  }
+
+  return cents / 100;
+}
+
 /**
- * الحصول على بداية ونهاية الشهر المختار
+ * الحصول على بداية الشهر المختار ونهاية الشهر بشكل Exclusive.
  *
- * القيمة تكون بالشكل:
+ * مثال:
  * 2026-08
+ *
+ * start        = 2026-08-01 00:00:00
+ * endExclusive = 2026-09-01 00:00:00
  */
-function getMonthRange(month?: string) {
+function getMonthRange(
+  month?: string,
+) {
   const now = new Date();
 
-  let year = now.getFullYear();
-  let monthIndex = now.getMonth();
+  let year =
+    now.getFullYear();
 
-  if (month && /^\d{4}-\d{2}$/.test(month)) {
-    const [selectedYear, selectedMonth] = month
-      .split("-")
-      .map(Number);
+  let monthIndex =
+    now.getMonth();
 
-    if (
-      selectedYear >= 2000 &&
-      selectedYear <= 2100 &&
-      selectedMonth >= 1 &&
-      selectedMonth <= 12
-    ) {
-      year = selectedYear;
-      monthIndex = selectedMonth - 1;
+  if (month) {
+    const match =
+      /^(\d{4})-(0[1-9]|1[0-2])$/.exec(
+        month,
+      );
+
+    if (match) {
+      const selectedYear =
+        Number(match[1]);
+
+      const selectedMonth =
+        Number(match[2]);
+
+      if (
+        Number.isInteger(
+          selectedYear,
+        ) &&
+        selectedYear >= 2000 &&
+        selectedYear <= 2100
+      ) {
+        year =
+          selectedYear;
+
+        monthIndex =
+          selectedMonth - 1;
+      }
     }
   }
 
-  const start = new Date(
-    year,
-    monthIndex,
-    1,
-    0,
-    0,
-    0,
-    0
-  );
+  const start =
+    new Date(
+      year,
+      monthIndex,
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
 
-  const end = new Date(
-    year,
-    monthIndex + 1,
-    0,
-    23,
-    59,
-    59,
-    999
-  );
+  const endExclusive =
+    new Date(
+      year,
+      monthIndex + 1,
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
 
-  const value = `${year}-${String(
-    monthIndex + 1
-  ).padStart(2, "0")}`;
+  const displayEnd =
+    new Date(
+      year,
+      monthIndex + 1,
+      0,
+      0,
+      0,
+      0,
+      0,
+    );
+
+  const value =
+    `${year}-${String(
+      monthIndex + 1,
+    ).padStart(2, "0")}`;
 
   return {
     start,
-    end,
+    endExclusive,
+    displayEnd,
     value,
     year,
     monthIndex,
@@ -82,17 +175,20 @@ function getMonthRange(month?: string) {
  */
 function formatMonth(
   year: number,
-  monthIndex: number
+  monthIndex: number,
 ) {
-  return new Intl.DateTimeFormat("ar-EG", {
-    month: "long",
-    year: "numeric",
-  }).format(
+  return new Intl.DateTimeFormat(
+    "ar-EG",
+    {
+      month: "long",
+      year: "numeric",
+    },
+  ).format(
     new Date(
       year,
       monthIndex,
-      1
-    )
+      1,
+    ),
   );
 }
 
@@ -100,14 +196,21 @@ function formatMonth(
  * تنسيق التاريخ بشكل ثابت
  * لتجنب مشاكل Hydration
  */
-function formatDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(
-    date.getMonth() + 1
-  ).padStart(2, "0");
-  const day = String(
-    date.getDate()
-  ).padStart(2, "0");
+function formatDate(
+  date: Date,
+) {
+  const year =
+    date.getFullYear();
+
+  const month =
+    String(
+      date.getMonth() + 1,
+    ).padStart(2, "0");
+
+  const day =
+    String(
+      date.getDate(),
+    ).padStart(2, "0");
 
   return `${day}/${month}/${year}`;
 }
@@ -117,41 +220,46 @@ export default async function SubscriptionsPage({
 }: {
   searchParams: SearchParams;
 }) {
-  const params = await searchParams;
+  await requireAdmin();
+
+  const params =
+    await searchParams;
 
   const {
     start: monthStart,
-    end: monthEnd,
+    endExclusive:
+      monthEndExclusive,
+    displayEnd:
+      monthDisplayEnd,
     value: selectedMonth,
     year,
     monthIndex,
-  } = getMonthRange(params.month);
+  } = getMonthRange(
+    params.month,
+  );
 
   /*
-   * إجمالي العملاء الموجودين في النظام
+   * Fetch independent statistics in parallel.
+   *
+   * Monthly income is read directly from Payment rows that happened inside
+   * the selected month. This is more accurate than deriving it only from
+   * subscriptions that happen to overlap that month.
    */
-  const totalClients =
-    await prisma.client.count();
+  const [
+    totalClients,
+    rawSubscriptions,
+    monthlyPayments,
+  ] = await Promise.all([
+    prisma.client.count(),
 
-  /*
-   * الاشتراكات التي تتقاطع مع الشهر المختار.
-   *
-   * مثال:
-   *
-   * اشتراك يبدأ 1/8 وينتهي 31/8
-   * → يظهر في أغسطس
-   *
-   * اشتراك يبدأ 15/7 وينتهي 15/8
-   * → يظهر في أغسطس
-   *
-   * اشتراك انتهى 31/7
-   * → لا يظهر في أغسطس
-   */
-  const rawSubscriptions =
-    await prisma.subscription.findMany({
+    prisma.subscription.findMany({
       where: {
+        /*
+         * Subscription overlaps the selected month:
+         * start < next month AND end >= start of selected month.
+         */
         startDate: {
-          lte: monthEnd,
+          lt: monthEndExclusive,
         },
 
         endDate: {
@@ -165,7 +273,7 @@ export default async function SubscriptionsPage({
         payments: {
           where: {
             paymentDate: {
-              lte: monthEnd,
+              lt: monthEndExclusive,
             },
           },
 
@@ -178,128 +286,159 @@ export default async function SubscriptionsPage({
       orderBy: {
         createdAt: "desc",
       },
-    });
+    }),
+
+    prisma.payment.findMany({
+      where: {
+        paymentDate: {
+          gte: monthStart,
+          lt: monthEndExclusive,
+        },
+      },
+
+      select: {
+        amount: true,
+      },
+    }),
+  ]);
 
   /*
-   * تجهيز الاشتراكات للشهر المختار
+   * تجهيز الاشتراكات للشهر المختار.
+   *
+   * All monetary arithmetic is performed in integer cents. This works with
+   * the current Float schema and remains safe after Prisma starts returning
+   * Decimal values.
    */
   const subscriptions =
-    rawSubscriptions.map((sub) => {
-      /*
-       * كل المدفوعات حتى نهاية الشهر المختار
-       */
-      const paidUntilMonthEnd =
-        sub.payments.reduce(
-          (sum, payment) =>
-            sum + payment.amount,
-          0
-        );
+    rawSubscriptions.map(
+      (sub) => {
+        const totalCents =
+          toCents(
+            sub.totalAmount,
+          );
 
-      /*
-       * المتبقي حتى نهاية الشهر المختار
-       */
-      const remainingUntilMonthEnd =
-        Math.max(
-          0,
-          sub.totalAmount -
-            paidUntilMonthEnd
-        );
+        const paidUntilMonthEndCents =
+          sub.payments.reduce(
+            (
+              sum,
+              payment,
+            ) =>
+              sum +
+              toCents(
+                payment.amount,
+              ),
+            0,
+          );
 
-      /*
-       * حالة الاشتراك بالنسبة للشهر المختار
-       */
-      const status =
-        new Date(sub.endDate) <
-        monthEnd
-          ? "EXPIRED"
-          : "ACTIVE";
+        const remainingUntilMonthEndCents =
+          Math.max(
+            0,
+            totalCents -
+              paidUntilMonthEndCents,
+          );
 
-      return {
-        ...sub,
+        /*
+         * Preserve CANCELLED explicitly instead of reclassifying a cancelled
+         * subscription as ACTIVE solely because its endDate is in the future.
+         */
+        const status =
+          sub.status ===
+          "CANCELLED"
+            ? "CANCELLED"
+            : sub.endDate <
+                monthEndExclusive
+              ? "EXPIRED"
+              : "ACTIVE";
 
-        paidAmount:
-          paidUntilMonthEnd,
+        return {
+          ...sub,
 
-        remainingAmount:
-          remainingUntilMonthEnd,
+          totalAmount:
+            fromCents(
+              totalCents,
+            ),
 
-        status,
-      };
-    });
+          paidAmount:
+            fromCents(
+              paidUntilMonthEndCents,
+            ),
 
-  /*
-   * الاشتراكات النشطة
-   */
+          remainingAmount:
+            fromCents(
+              remainingUntilMonthEndCents,
+            ),
+
+          payments:
+            sub.payments.map(
+              (payment) => ({
+                ...payment,
+
+                amount:
+                  moneyToNumber(
+                    payment.amount,
+                  ),
+              }),
+            ),
+
+          status,
+        };
+      },
+    );
+
   const activeSubscriptions =
     subscriptions.filter(
       (sub) =>
         sub.status ===
-        "ACTIVE"
+        "ACTIVE",
     );
 
-  /*
-   * الاشتراكات المنتهية
-   */
   const expiredSubscriptions =
     subscriptions.filter(
       (sub) =>
         sub.status ===
-        "EXPIRED"
+        "EXPIRED",
     );
 
   /*
-   * إجمالي المدفوعات التي تمت داخل الشهر المختار فقط
+   * إجمالي المدفوعات التي تمت داخل الشهر المختار فقط.
    */
+  const totalMonthlyIncomeCents =
+    monthlyPayments.reduce(
+      (sum, payment) =>
+        sum +
+        toCents(
+          payment.amount,
+        ),
+      0,
+    );
+
   const totalMonthlyIncome =
-    rawSubscriptions.reduce(
-      (subscriptionTotal, sub) => {
-        const monthlyPayments =
-          sub.payments
-            .filter((payment) => {
-              const paymentDate =
-                new Date(
-                  payment.paymentDate
-                );
-
-              return (
-                paymentDate >=
-                  monthStart &&
-                paymentDate <=
-                  monthEnd
-              );
-            })
-            .reduce(
-              (sum, payment) =>
-                sum + payment.amount,
-              0
-            );
-
-        return (
-          subscriptionTotal +
-          monthlyPayments
-        );
-      },
-      0
+    fromCents(
+      totalMonthlyIncomeCents,
     );
 
   /*
-   * إجمالي المتبقي
+   * إجمالي المتبقي بالنسبة لنهاية الشهر المختار.
    */
-  const totalRemaining =
+  const totalRemainingCents =
     subscriptions.reduce(
       (sum, sub) =>
         sum +
-        sub.remainingAmount,
-      0
+        toCents(
+          sub.remainingAmount,
+        ),
+      0,
     );
 
-  /*
-   * اسم الشهر بالعربي
-   */
+  const totalRemaining =
+    fromCents(
+      totalRemainingCents,
+    );
+
   const monthLabel =
     formatMonth(
       year,
-      monthIndex
+      monthIndex,
     );
 
   return (
@@ -317,12 +456,16 @@ export default async function SubscriptionsPage({
         </div>
 
         <div className="flex flex-col sm:flex-row gap-3">
-  <div className="flex items-center gap-2">
-    <MonthSelector value={selectedMonth} />
-  </div>
+          <div className="flex items-center gap-2">
+            <MonthSelector
+              value={
+                selectedMonth
+              }
+            />
+          </div>
 
-  <AddSubscriptionModal />
-</div>
+          <AddSubscriptionModal />
+        </div>
       </div>
 
       {/* الشهر المحدد */}
@@ -346,11 +489,11 @@ export default async function SubscriptionsPage({
           <div className="text-sm text-slate-500 mr-auto">
             من{" "}
             {formatDate(
-              monthStart
+              monthStart,
             )}{" "}
             إلى{" "}
             {formatDate(
-              monthEnd
+              monthDisplayEnd,
             )}
           </div>
         </div>
@@ -432,7 +575,7 @@ export default async function SubscriptionsPage({
 
               <h3 className="text-xl md:text-3xl font-bold mt-2 text-blue-600">
                 {totalMonthlyIncome.toLocaleString(
-                  "ar-EG"
+                  "ar-EG",
                 )}{" "}
                 ج
               </h3>
@@ -455,7 +598,7 @@ export default async function SubscriptionsPage({
 
               <h3 className="text-xl md:text-3xl font-bold mt-2 text-orange-500">
                 {totalRemaining.toLocaleString(
-                  "ar-EG"
+                  "ar-EG",
                 )}{" "}
                 ج
               </h3>

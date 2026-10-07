@@ -1,3 +1,4 @@
+import { requireAuth } from "@/lib/guards";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
@@ -10,6 +11,8 @@ export default async function AppointmentDetailsPage({
     id: string;
   }>;
 }) {
+  const currentUser = await requireAuth();
+
   const { id } = await params;
 
   const appointment =
@@ -21,13 +24,17 @@ export default async function AppointmentDetailsPage({
         client: true,
         employee: {
           include: {
-            user: true,
+            user: { select: { id: true, name: true, email: true, role: true } },
           },
         },
       },
     });
 
   if (!appointment) {
+    notFound();
+  }
+
+  if (currentUser.role !== "ADMIN" && appointment.employeeId !== currentUser.employeeId) {
     notFound();
   }
 

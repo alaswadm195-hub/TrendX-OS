@@ -1,9 +1,20 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+
 import AddInvoiceModal from "@/components/finance/AddInvoiceModal";
 import AddExpenseModal from "@/components/finance/AddExpenseModal";
+
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/current-user";
+import {
+  expenseCategoryLabels,
+  formatMoney,
+  getFinanceSnapshot,
+  getPaymentMethodBreakdown,
+  getRecentTreasuryMovements,
+  moneyToCents,
+  paymentMethodLabels,
+} from "@/lib/finance";
 
 type FinancePageProps = {
   searchParams: Promise<{
@@ -11,381 +22,675 @@ type FinancePageProps = {
   }>;
 };
 
+function formatDateTime(
+  date: Date,
+) {
+  return new Intl.DateTimeFormat(
+    "ar-EG",
+    {
+      timeZone:
+        "Africa/Cairo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    },
+  ).format(date);
+}
+
 export default async function FinancePage({
   searchParams,
 }: FinancePageProps) {
-  const currentUser = await getCurrentUser();
+  const currentUser =
+    await getCurrentUser();
 
   if (!currentUser) {
     redirect("/login");
   }
 
-  if (currentUser.role !== "ADMIN") {
+  if (
+    currentUser.role !==
+    "ADMIN"
+  ) {
     redirect("/tasks");
   }
 
-  const params = await searchParams;
+  const params =
+    await searchParams;
 
   const invoiceStatus =
-    params.invoiceStatus === "PAID" ||
-    params.invoiceStatus === "OPEN"
+    params.invoiceStatus ===
+      "PAID" ||
+    params.invoiceStatus ===
+      "OPEN" ||
+    params.invoiceStatus ===
+      "CANCELLED"
       ? params.invoiceStatus
       : "ALL";
 
-  const invoices =
-    await prisma.invoice.findMany({
+  const [
+    snapshot,
+    movements,
+    paymentMethods,
+    invoices,
+    expenses,
+  ] = await Promise.all([
+    getFinanceSnapshot(),
+    getRecentTreasuryMovements(
+      20,
+    ),
+    getPaymentMethodBreakdown(),
+
+    prisma.invoice.findMany({
+      select: {
+        id: true,
+        clientId: true,
+        customerName: true,
+        title: true,
+        totalAmount: true,
+        paidAmount: true,
+        remainingAmount: true,
+        status: true,
+        createdAt: true,
+        client: {
+          select: {
+            name: true,
+          },
+        },
+      },
       orderBy: {
         createdAt: "desc",
       },
-    });
+    }),
 
-  const expenses =
-    await prisma.expense.findMany({
+    prisma.expense.findMany({
+      take: 30,
+      select: {
+        id: true,
+        title: true,
+        amount: true,
+        category: true,
+        paymentMethod: true,
+        referenceNumber: true,
+        notes: true,
+        expenseDate: true,
+      },
       orderBy: {
         expenseDate: "desc",
       },
-    });
+    }),
+  ]);
 
-  /*
-   * الإحصائيات العامة
-   * تظل محسوبة على كل الفواتير
-   */
-  const totalInvoices =
-    invoices.length;
-
-  const totalSales =
-    invoices.reduce(
-      (sum, invoice) =>
-        sum + invoice.totalAmount,
-      0
-    );
-
-  const totalPaid =
-    invoices.reduce(
-      (sum, invoice) =>
-        sum + invoice.paidAmount,
-      0
-    );
-
-  const totalRemaining =
-    invoices.reduce(
-      (sum, invoice) =>
-        sum + invoice.remainingAmount,
-      0
-    );
-
-  const totalExpenses =
-    expenses.reduce(
-      (sum, expense) =>
-        sum + expense.amount,
-      0
-    );
-
-  const cashBalance =
-    totalPaid -
-    totalExpenses;
-
-  const openInvoices =
-    invoices.filter(
-      (invoice) =>
-        invoice.status !== "PAID"
-    ).length;
-
-  /*
-   * الفواتير المعروضة في الجدول
-   */
   const filteredInvoices =
     invoiceStatus === "PAID"
       ? invoices.filter(
           (invoice) =>
-            invoice.status === "PAID"
+            invoice.status ===
+            "PAID",
         )
       : invoiceStatus === "OPEN"
         ? invoices.filter(
             (invoice) =>
-              invoice.status !== "PAID"
+              invoice.status ===
+                "PENDING" ||
+              invoice.status ===
+                "PARTIAL",
           )
-        : invoices;
+        : invoiceStatus ===
+            "CANCELLED"
+          ? invoices.filter(
+              (invoice) =>
+                invoice.status ===
+                "CANCELLED",
+            )
+          : invoices;
+
+  const cards = [
+    {
+      label:
+        "إجمالي المبيعات",
+      value:
+        formatMoney(
+          snapshot.salesCents,
+        ),
+      hint: `فواتير ${formatMoney(
+        snapshot.invoiceSalesCents,
+      )} • اشتراكات ${formatMoney(
+        snapshot.subscriptionSalesCents,
+      )}`,
+      className:
+        "text-emerald-700",
+    },
+    {
+      label: "المتحصل",
+      value:
+        formatMoney(
+          snapshot.collectionsCents,
+        ),
+      hint: "فلوس دخلت فعليًا",
+      className:
+        "text-[#123b69]",
+    },
+    {
+      label:
+        "مستحقات العملاء",
+      value:
+        formatMoney(
+          snapshot.receivablesCents,
+        ),
+      hint: "المبالغ المتبقية للتحصيل",
+      className:
+        "text-amber-600",
+    },
+    {
+      label: "المصروفات",
+      value:
+        formatMoney(
+          snapshot.expensesCents,
+        ),
+      hint: "إجمالي المصروفات المسجلة",
+      className:
+        "text-red-600",
+    },
+    {
+      label: "رصيد الخزنة",
+      value:
+        formatMoney(
+          snapshot.cashBalanceCents,
+        ),
+      hint:
+        "المتحصل − المصروفات",
+      className:
+        snapshot.cashBalanceCents >=
+        0
+          ? "text-blue-700"
+          : "text-red-700",
+    },
+    {
+      label:
+        "الفواتير المفتوحة",
+      value:
+        snapshot.openInvoiceCount.toLocaleString(
+          "ar-EG",
+        ),
+      hint:
+        "غير المدفوعة + الجزئية",
+      className:
+        "text-violet-700",
+    },
+  ];
 
   return (
-    <div className="p-6 lg:p-8">
-      {/* Header */}
-      <div className="flex flex-wrap gap-3 items-center justify-between mb-8">
+    <div
+      dir="rtl"
+      className="p-4 md:p-6 lg:p-8"
+    >
+      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">
+          <p className="text-sm font-bold text-[#f28a32]">
+            Finance Center
+          </p>
+
+          <h1 className="mt-1 text-3xl font-black text-[#102f55]">
             المالية
           </h1>
 
-          <p className="text-slate-500 mt-2">
-            إدارة الفواتير
-            والمبيعات
+          <p className="mt-2 text-sm font-medium text-slate-500">
+            المبيعات، التحصيلات،
+            المستحقات وحركة الخزنة
+            في مكان واحد
           </p>
         </div>
 
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <AddExpenseModal />
-
           <AddInvoiceModal />
+
+          <Link
+            href="/finance/reports"
+            className="rounded-2xl border border-[#dfe6ef] bg-white px-4 py-3 text-sm font-bold text-[#17385f] shadow-sm transition hover:bg-slate-50"
+          >
+            التقارير
+          </Link>
         </div>
       </div>
 
-      {/* Statistics */}
-      <div className="grid md:grid-cols-5 gap-6 mb-8">
-        <div className="bg-white rounded-2xl border p-6">
-          <p className="text-slate-500">
-            إجمالي الفواتير
-          </p>
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+        {cards.map(
+          (card) => (
+            <div
+              key={card.label}
+              className="rounded-[22px] border border-[#e4eaf1] bg-white p-5 shadow-[0_8px_24px_rgba(15,47,85,0.05)]"
+            >
+              <p className="text-sm font-bold text-slate-500">
+                {card.label}
+              </p>
 
-          <h3 className="text-3xl font-bold mt-3">
-            {totalInvoices}
-          </h3>
-        </div>
+              <h3
+                className={`mt-3 text-2xl font-black ${card.className}`}
+              >
+                {card.value}
+              </h3>
 
-        <div className="bg-white rounded-2xl border p-6">
-          <p className="text-slate-500">
-            إجمالي المبيعات
-          </p>
-
-          <h3 className="text-3xl font-bold mt-3 text-green-600">
-            {totalSales.toLocaleString()} ج
-          </h3>
-        </div>
-
-        <div className="bg-white rounded-2xl border p-6">
-          <p className="text-slate-500">
-            المتحصل
-          </p>
-
-          <h3 className="text-3xl font-bold mt-3 text-green-700">
-            {totalPaid.toLocaleString()} ج
-          </h3>
-        </div>
-
-        <div className="bg-white rounded-2xl border p-6">
-          <p className="text-slate-500">
-            المصروفات
-          </p>
-
-          <h3 className="text-3xl font-bold mt-3 text-red-600">
-            {totalExpenses.toLocaleString()} ج
-          </h3>
-        </div>
-
-        <div className="bg-white rounded-2xl border p-6">
-          <p className="text-slate-500">
-            رصيد الخزنة
-          </p>
-
-          <h3 className="text-3xl font-bold mt-3 text-blue-600">
-            {cashBalance.toLocaleString()} ج
-          </h3>
-        </div>
+              <p className="mt-2 text-xs font-medium leading-5 text-slate-400">
+                {card.hint}
+              </p>
+            </div>
+          ),
+        )}
       </div>
 
-      {/* Invoices */}
-      <div className="bg-white rounded-2xl border overflow-hidden mb-8">
-        {/* Invoices Header */}
-        <div className="p-6 border-b">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <h2 className="text-xl font-bold">
+      <div className="mb-8 grid grid-cols-1 gap-6 xl:grid-cols-3">
+        <section className="overflow-hidden rounded-[24px] border border-[#e4eaf1] bg-white shadow-[0_8px_24px_rgba(15,47,85,0.05)] xl:col-span-2">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf1f5] p-5 md:p-6">
+            <div>
+              <h2 className="text-xl font-black text-[#102f55]">
+                سجل حركة الخزنة
+              </h2>
+
+              <p className="mt-1 text-sm text-slate-500">
+                آخر التحصيلات
+                والمصروفات بترتيب
+                زمني
+              </p>
+            </div>
+
+            <span className="rounded-full bg-[#f5f8fc] px-3 py-1 text-xs font-bold text-[#17385f]">
+              آخر{" "}
+              {movements.length.toLocaleString(
+                "ar-EG",
+              )}{" "}
+              حركة
+            </span>
+          </div>
+
+          {movements.length ===
+          0 ? (
+            <div className="py-14 text-center text-sm text-slate-500">
+              لا توجد حركة مالية حتى
+              الآن
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px]">
+                <thead>
+                  <tr className="border-b border-[#edf1f5] bg-[#fafbfd] text-xs text-slate-500">
+                    <th className="p-4 text-right">
+                      التاريخ
+                    </th>
+                    <th className="p-4 text-right">
+                      البيان
+                    </th>
+                    <th className="p-4 text-right">
+                      الطرف
+                    </th>
+                    <th className="p-4 text-right">
+                      الطريقة
+                    </th>
+                    <th className="p-4 text-right">
+                      المرجع
+                    </th>
+                    <th className="p-4 text-right">
+                      المبلغ
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {movements.map(
+                    (movement) => (
+                      <tr
+                        key={
+                          movement.id
+                        }
+                        className="border-b border-[#f0f3f6] last:border-0"
+                      >
+                        <td className="whitespace-nowrap p-4 text-xs text-slate-500">
+                          {formatDateTime(
+                            movement.date,
+                          )}
+                        </td>
+
+                        <td className="p-4">
+                          <p className="font-bold text-[#17385f]">
+                            {
+                              movement.title
+                            }
+                          </p>
+
+                          <p className="mt-1 text-xs text-slate-400">
+                            {movement.kind ===
+                            "INVOICE_PAYMENT"
+                              ? "دفعة فاتورة"
+                              : movement.kind ===
+                                  "SUBSCRIPTION_PAYMENT"
+                                ? "دفعة اشتراك"
+                                : "مصروف"}
+                          </p>
+                        </td>
+
+                        <td className="p-4 text-sm text-slate-600">
+                          {
+                            movement.party
+                          }
+                        </td>
+
+                        <td className="p-4 text-sm font-semibold text-slate-600">
+                          {
+                            paymentMethodLabels[
+                              movement
+                                .paymentMethod
+                            ]
+                          }
+                        </td>
+
+                        <td className="p-4 text-xs text-slate-500">
+                          {movement.referenceNumber ||
+                            "—"}
+                        </td>
+
+                        <td
+                          className={`p-4 font-black ${
+                            movement.direction ===
+                            "IN"
+                              ? "text-emerald-600"
+                              : "text-red-600"
+                          }`}
+                        >
+                          {movement.direction ===
+                          "IN"
+                            ? "+"
+                            : "-"}
+                          {formatMoney(
+                            movement.amountCents,
+                          )}
+                        </td>
+                      </tr>
+                    ),
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-[24px] border border-[#e4eaf1] bg-white p-5 shadow-[0_8px_24px_rgba(15,47,85,0.05)] md:p-6">
+          <h2 className="text-xl font-black text-[#102f55]">
+            التحصيل حسب طريقة
+            الدفع
+          </h2>
+
+          <p className="mt-1 text-sm text-slate-500">
+            توزيع كل الفلوس
+            المستلمة فعليًا
+          </p>
+
+          <div className="mt-6 space-y-3">
+            {paymentMethods.length ===
+            0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-400">
+                لا توجد تحصيلات
+                مسجلة
+              </div>
+            ) : (
+              paymentMethods.map(
+                (item) => (
+                  <div
+                    key={
+                      item.paymentMethod
+                    }
+                    className="flex items-center justify-between gap-4 rounded-2xl bg-[#f8fafc] px-4 py-3"
+                  >
+                    <span className="text-sm font-bold text-[#17385f]">
+                      {item.label}
+                    </span>
+
+                    <span className="font-black text-[#102f55]">
+                      {formatMoney(
+                        item.amountCents,
+                      )}
+                    </span>
+                  </div>
+                ),
+              )
+            )}
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-[#f1ddc6] bg-[#fffaf4] p-4 text-xs font-medium leading-6 text-[#87511d]">
+            المبيعات ≠ الخزنة.
+            الخزنة تتحرك فقط عند
+            تسجيل دفعة فعلية أو
+            مصروف فعلي.
+          </div>
+        </section>
+      </div>
+
+      <section className="mb-8 overflow-hidden rounded-[24px] border border-[#e4eaf1] bg-white shadow-[0_8px_24px_rgba(15,47,85,0.05)]">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#edf1f5] p-5 md:p-6">
+          <div>
+            <h2 className="text-xl font-black text-[#102f55]">
               الفواتير
             </h2>
 
-            {/* Filters */}
-            <div className="flex flex-wrap gap-2">
-              <Link
-                href="/finance"
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
-                  invoiceStatus === "ALL"
-                    ? "bg-blue-600 text-white"
-                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                }`}
-              >
-                كل الفواتير
-              </Link>
+            <p className="mt-1 text-sm text-slate-500">
+              الإجمالي، المدفوع
+              والمتبقي لكل فاتورة
+            </p>
+          </div>
 
-              <Link
-                href="/finance?invoiceStatus=PAID"
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
-                  invoiceStatus === "PAID"
-                    ? "bg-green-600 text-white"
-                    : "bg-green-50 text-green-700 hover:bg-green-100"
-                }`}
-              >
-                الفواتير المدفوعة
-              </Link>
-
-              <Link
-                href="/finance?invoiceStatus=OPEN"
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
-                  invoiceStatus === "OPEN"
-                    ? "bg-orange-500 text-white"
-                    : "bg-orange-50 text-orange-700 hover:bg-orange-100"
-                }`}
-              >
-                الفواتير غير المكتملة
-              </Link>
-            </div>
+          <div className="flex flex-wrap gap-2 text-xs font-bold">
+            {[
+              ["ALL", "كل الفواتير"],
+              ["OPEN", "غير مكتملة"],
+              ["PAID", "مدفوعة"],
+              [
+                "CANCELLED",
+                "ملغاة",
+              ],
+            ].map(
+              ([
+                value,
+                label,
+              ]) => (
+                <Link
+                  key={value}
+                  href={
+                    value ===
+                    "ALL"
+                      ? "/finance"
+                      : `/finance?invoiceStatus=${value}`
+                  }
+                  className={`rounded-xl px-3 py-2 transition ${
+                    invoiceStatus ===
+                    value
+                      ? "bg-[#123b69] text-white"
+                      : "bg-[#f5f8fc] text-[#17385f] hover:bg-[#edf3f9]"
+                  }`}
+                >
+                  {label}
+                </Link>
+              ),
+            )}
           </div>
         </div>
 
-        {/* Current Filter */}
-        <div className="px-6 py-3 bg-slate-50 border-b text-sm text-slate-500">
-          {invoiceStatus === "PAID" && (
-            <span>
-              عرض الفواتير المدفوعة بالكامل
-            </span>
-          )}
-
-          {invoiceStatus === "OPEN" && (
-            <span>
-              عرض الفواتير التي لم يكتمل سدادها
-            </span>
-          )}
-
-          {invoiceStatus === "ALL" && (
-            <span>
-              عرض جميع الفواتير
-            </span>
-          )}
-        </div>
-
-        {/* Empty State */}
-        {filteredInvoices.length === 0 ? (
-          <div className="text-center py-12 text-slate-500">
-            لا توجد فواتير في هذا التصنيف
+        {filteredInvoices.length ===
+        0 ? (
+          <div className="py-14 text-center text-sm text-slate-500">
+            لا توجد فواتير في هذا
+            التصنيف
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full min-w-[850px]">
               <thead>
-                <tr className="border-b bg-slate-50">
-                  <th className="text-right p-4">
+                <tr className="border-b border-[#edf1f5] bg-[#fafbfd] text-xs text-slate-500">
+                  <th className="p-4 text-right">
                     العميل
                   </th>
-
-                  <th className="text-right p-4">
+                  <th className="p-4 text-right">
                     الخدمة
                   </th>
-
-                  <th className="text-right p-4">
+                  <th className="p-4 text-right">
                     الإجمالي
                   </th>
-
-                  <th className="text-right p-4">
+                  <th className="p-4 text-right">
                     المدفوع
                   </th>
-
-                  <th className="text-right p-4">
+                  <th className="p-4 text-right">
                     المتبقي
                   </th>
-
-                  <th className="text-right p-4">
+                  <th className="p-4 text-right">
                     الحالة
+                  </th>
+                  <th className="p-4 text-right">
+                    الإجراء
                   </th>
                 </tr>
               </thead>
 
               <tbody>
                 {filteredInvoices.map(
-                  (invoice) => (
-                    <tr
-                      key={invoice.id}
-                      className="border-b hover:bg-slate-50"
-                    >
-                      <td className="p-4">
-                        <Link
-                          href={`/finance/invoices/${invoice.id}`}
-                          className="font-medium text-blue-600 hover:underline"
-                        >
-                          {invoice.customerName ||
-                            "عميل"}
-                        </Link>
-                      </td>
+                  (invoice) => {
+                    const customerName =
+                      invoice.client
+                        ?.name ||
+                      invoice.customerName ||
+                      "عميل";
 
-                      <td className="p-4">
-                        <Link
-                          href={`/finance/invoices/${invoice.id}`}
-                          className="hover:underline"
-                        >
-                          {invoice.title}
-                        </Link>
-                      </td>
-
-                      <td className="p-4">
-                        {invoice.totalAmount} ج
-                      </td>
-
-                      <td className="p-4 text-green-600">
-                        {invoice.paidAmount} ج
-                      </td>
-
-                      <td className="p-4 text-orange-500">
-                        {invoice.remainingAmount} ج
-                      </td>
-
-                      <td className="p-4">
-                        <div className="flex items-center gap-3">
-                          {invoice.status ===
-                          "PAID" ? (
-                            <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm">
-                              مدفوعة
-                            </span>
-                          ) : invoice.status ===
-                            "PARTIAL" ? (
-                            <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-sm">
-                              مدفوعة جزئياً
-                            </span>
+                    return (
+                      <tr
+                        key={
+                          invoice.id
+                        }
+                        className="border-b border-[#f0f3f6] last:border-0"
+                      >
+                        <td className="p-4 font-bold text-[#17385f]">
+                          {invoice.clientId ? (
+                            <Link
+                              href={`/clients/${invoice.clientId}/statement`}
+                              className="hover:underline"
+                            >
+                              {
+                                customerName
+                              }
+                            </Link>
                           ) : (
-                            <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-sm">
-                              غير مدفوعة
-                            </span>
+                            customerName
                           )}
+                        </td>
 
+                        <td className="p-4 text-sm text-slate-600">
+                          {
+                            invoice.title
+                          }
+                        </td>
+
+                        <td className="p-4 font-bold text-[#102f55]">
+                          {formatMoney(
+                            moneyToCents(
+                              invoice.totalAmount,
+                            ),
+                          )}
+                        </td>
+
+                        <td className="p-4 font-bold text-emerald-600">
+                          {formatMoney(
+                            moneyToCents(
+                              invoice.paidAmount,
+                            ),
+                          )}
+                        </td>
+
+                        <td className="p-4 font-bold text-amber-600">
+                          {formatMoney(
+                            moneyToCents(
+                              invoice.remainingAmount,
+                            ),
+                          )}
+                        </td>
+
+                        <td className="p-4">
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-bold ${
+                              invoice.status ===
+                              "PAID"
+                                ? "bg-emerald-50 text-emerald-700"
+                                : invoice.status ===
+                                    "PARTIAL"
+                                  ? "bg-amber-50 text-amber-700"
+                                  : invoice.status ===
+                                      "CANCELLED"
+                                    ? "bg-red-50 text-red-700"
+                                    : "bg-slate-100 text-slate-600"
+                            }`}
+                          >
+                            {invoice.status ===
+                            "PAID"
+                              ? "مدفوعة"
+                              : invoice.status ===
+                                  "PARTIAL"
+                                ? "جزئية"
+                                : invoice.status ===
+                                    "CANCELLED"
+                                  ? "ملغاة"
+                                  : "غير مدفوعة"}
+                          </span>
+                        </td>
+
+                        <td className="p-4">
                           <Link
                             href={`/finance/invoices/${invoice.id}`}
-                            className="text-blue-600 text-sm hover:underline"
+                            className="text-sm font-bold text-[#123b69] hover:underline"
                           >
                             التفاصيل
                           </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  )
+                        </td>
+                      </tr>
+                    );
+                  },
                 )}
               </tbody>
             </table>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Expenses */}
-      <div className="bg-white rounded-2xl border overflow-hidden">
-        <div className="p-6 border-b">
-          <h2 className="text-xl font-bold">
-            المصروفات
+      <section className="overflow-hidden rounded-[24px] border border-[#e4eaf1] bg-white shadow-[0_8px_24px_rgba(15,47,85,0.05)]">
+        <div className="border-b border-[#edf1f5] p-5 md:p-6">
+          <h2 className="text-xl font-black text-[#102f55]">
+            آخر المصروفات
           </h2>
         </div>
 
-        {expenses.length === 0 ? (
-          <div className="text-center py-12 text-slate-500">
+        {expenses.length ===
+        0 ? (
+          <div className="py-14 text-center text-sm text-slate-500">
             لا توجد مصروفات
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full">
+            <table className="w-full min-w-[760px]">
               <thead>
-                <tr className="border-b bg-slate-50">
-                  <th className="text-right p-4">
+                <tr className="border-b border-[#edf1f5] bg-[#fafbfd] text-xs text-slate-500">
+                  <th className="p-4 text-right">
+                    التاريخ
+                  </th>
+                  <th className="p-4 text-right">
                     المصروف
                   </th>
-
-                  <th className="text-right p-4">
-                    المبلغ
+                  <th className="p-4 text-right">
+                    التصنيف
                   </th>
-
-                  <th className="text-right p-4">
-                    الملاحظات
+                  <th className="p-4 text-right">
+                    الطريقة
+                  </th>
+                  <th className="p-4 text-right">
+                    المرجع
+                  </th>
+                  <th className="p-4 text-right">
+                    المبلغ
                   </th>
                 </tr>
               </thead>
@@ -395,37 +700,77 @@ export default async function FinancePage({
                   (expense) => (
                     <tr
                       key={expense.id}
-                      className="border-b"
+                      className="border-b border-[#f0f3f6] last:border-0"
                     >
-                      <td className="p-4">
-                        {expense.title}
-                      </td>
-
-                      <td className="p-4 text-red-600">
-                        {expense.amount} ج
+                      <td className="whitespace-nowrap p-4 text-xs text-slate-500">
+                        {formatDateTime(
+                          expense.expenseDate,
+                        )}
                       </td>
 
                       <td className="p-4">
-                        {expense.notes || "-"}
+                        <p className="font-bold text-[#17385f]">
+                          {
+                            expense.title
+                          }
+                        </p>
+                        {expense.notes && (
+                          <p className="mt-1 text-xs text-slate-400">
+                            {
+                              expense.notes
+                            }
+                          </p>
+                        )}
+                      </td>
+
+                      <td className="p-4 text-sm text-slate-600">
+                        {
+                          expenseCategoryLabels[
+                            expense
+                              .category
+                          ]
+                        }
+                      </td>
+
+                      <td className="p-4 text-sm text-slate-600">
+                        {
+                          paymentMethodLabels[
+                            expense
+                              .paymentMethod
+                          ]
+                        }
+                      </td>
+
+                      <td className="p-4 text-xs text-slate-500">
+                        {expense.referenceNumber ||
+                          "—"}
+                      </td>
+
+                      <td className="p-4 font-black text-red-600">
+                        -
+                        {formatMoney(
+                          moneyToCents(
+                            expense.amount,
+                          ),
+                        )}
                       </td>
                     </tr>
-                  )
+                  ),
                 )}
               </tbody>
             </table>
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Open Invoices */}
-      <div className="mt-6 bg-blue-50 border border-blue-200 rounded-2xl p-6">
-        <p className="text-sm text-slate-500 mb-2">
-          الفواتير المفتوحة
-        </p>
-
-        <h3 className="text-3xl font-bold text-blue-700">
-          {openInvoices}
-        </h3>
+      <div className="mt-6 rounded-2xl border border-[#f1ddc6] bg-[#fffaf4] p-4 text-sm font-medium leading-7 text-[#87511d]">
+        قاعدة العمل: الاشتراكات
+        للعقود والباقات المتكررة،
+        والفواتير للخدمات المنفصلة.
+        لا تسجل نفس عملية البيع
+        كاشتراك وفاتورة معًا حتى
+        لا تتكرر في إجمالي
+        المبيعات.
       </div>
     </div>
   );

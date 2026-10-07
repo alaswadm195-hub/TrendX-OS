@@ -1,5 +1,16 @@
-import { notFound } from "next/navigation";
+import Link from "next/link";
+import {
+  notFound,
+  redirect,
+} from "next/navigation";
+
 import { prisma } from "@/lib/prisma";
+import { getCurrentUser } from "@/lib/current-user";
+import {
+  formatMoney,
+  moneyToCents,
+  paymentMethodLabels,
+} from "@/lib/finance";
 
 type Props = {
   params: Promise<{
@@ -7,141 +18,444 @@ type Props = {
   }>;
 };
 
-export default async function ClientDetailsPage({
+type StatementRow = {
+  id: string;
+  date: Date;
+  description: string;
+  type:
+    | "CHARGE"
+    | "PAYMENT";
+  amountCents: number;
+  note?: string;
+};
+
+function formatDate(
+  date: Date,
+) {
+  return new Intl.DateTimeFormat(
+    "ar-EG",
+    {
+      timeZone:
+        "Africa/Cairo",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    },
+  ).format(date);
+}
+
+export default async function ClientStatementPage({
   params,
 }: Props) {
-  const { id } = await params;
+  const user =
+    await getCurrentUser();
 
-  const client = await prisma.client.findUnique({
-    where: { id },
-    include: {
-      subscriptions: true,
-      appointments: true,
-      transactions: true,
-      tasks: true,
-    },
-  });
+  if (!user) {
+    redirect("/login");
+  }
+
+  if (
+    user.role !== "ADMIN"
+  ) {
+    redirect("/tasks");
+  }
+
+  const { id } =
+    await params;
+
+  const client =
+    await prisma.client.findUnique(
+      {
+        where: {
+          id,
+        },
+        select: {
+          id: true,
+          name: true,
+          company: true,
+          phone: true,
+          email: true,
+          archivedAt: true,
+
+          subscriptions: {
+            orderBy: {
+              createdAt:
+                "asc",
+            },
+            select: {
+              id: true,
+              planName: true,
+              totalAmount: true,
+              remainingAmount:
+                true,
+              status: true,
+              createdAt: true,
+              payments: {
+                orderBy: {
+                  paymentDate:
+                    "asc",
+                },
+                select: {
+                  id: true,
+                  amount: true,
+                  paymentDate:
+                    true,
+                  paymentMethod:
+                    true,
+                  referenceNumber:
+                    true,
+                },
+              },
+            },
+          },
+
+          invoices: {
+            orderBy: {
+              createdAt:
+                "asc",
+            },
+            select: {
+              id: true,
+              title: true,
+              totalAmount: true,
+              remainingAmount:
+                true,
+              status: true,
+              createdAt: true,
+              payments: {
+                orderBy: {
+                  paymentDate:
+                    "asc",
+                },
+                select: {
+                  id: true,
+                  amount: true,
+                  paymentDate:
+                    true,
+                  paymentMethod:
+                    true,
+                  referenceNumber:
+                    true,
+                },
+              },
+            },
+          },
+        },
+      },
+    );
 
   if (!client) {
     notFound();
   }
 
-  const totalPaid = client.transactions.reduce(
-    (sum, tx) => sum + tx.amount,
-    0
+  let totalSalesCents = 0;
+  let totalPaidCents = 0;
+  let receivablesCents = 0;
+
+  const rows:
+    StatementRow[] = [];
+
+  for (const subscription of
+    client.subscriptions) {
+    if (
+      subscription.status !==
+      "CANCELLED"
+    ) {
+      totalSalesCents +=
+        moneyToCents(
+          subscription.totalAmount,
+        );
+
+      receivablesCents +=
+        moneyToCents(
+          subscription.remainingAmount,
+        );
+
+      rows.push({
+        id: `sub-charge-${subscription.id}`,
+        date:
+          subscription.createdAt,
+        description: `اشتراك: ${subscription.planName}`,
+        type: "CHARGE",
+        amountCents:
+          moneyToCents(
+            subscription.totalAmount,
+          ),
+      });
+    }
+
+    for (const payment of
+      subscription.payments) {
+      const amountCents =
+        moneyToCents(
+          payment.amount,
+        );
+
+      totalPaidCents +=
+        amountCents;
+
+      rows.push({
+        id: `sub-payment-${payment.id}`,
+        date:
+          payment.paymentDate,
+        description: `دفعة اشتراك: ${subscription.planName}`,
+        type: "PAYMENT",
+        amountCents,
+        note: `${
+          paymentMethodLabels[
+            payment
+              .paymentMethod
+          ]
+        }${
+          payment.referenceNumber
+            ? ` • ${payment.referenceNumber}`
+            : ""
+        }`,
+      });
+    }
+  }
+
+  for (const invoice of
+    client.invoices) {
+    if (
+      invoice.status !==
+      "CANCELLED"
+    ) {
+      totalSalesCents +=
+        moneyToCents(
+          invoice.totalAmount,
+        );
+
+      receivablesCents +=
+        moneyToCents(
+          invoice.remainingAmount,
+        );
+
+      rows.push({
+        id: `inv-charge-${invoice.id}`,
+        date:
+          invoice.createdAt,
+        description: `فاتورة: ${invoice.title}`,
+        type: "CHARGE",
+        amountCents:
+          moneyToCents(
+            invoice.totalAmount,
+          ),
+      });
+    }
+
+    for (const payment of
+      invoice.payments) {
+      const amountCents =
+        moneyToCents(
+          payment.amount,
+        );
+
+      totalPaidCents +=
+        amountCents;
+
+      rows.push({
+        id: `inv-payment-${payment.id}`,
+        date:
+          payment.paymentDate,
+        description: `دفعة فاتورة: ${invoice.title}`,
+        type: "PAYMENT",
+        amountCents,
+        note: `${
+          paymentMethodLabels[
+            payment
+              .paymentMethod
+          ]
+        }${
+          payment.referenceNumber
+            ? ` • ${payment.referenceNumber}`
+            : ""
+        }`,
+      });
+    }
+  }
+
+  rows.sort(
+    (a, b) =>
+      a.date.getTime() -
+      b.date.getTime(),
   );
 
   return (
-    <div className="p-6 lg:p-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold">
-          {client.name}
-        </h1>
+    <div
+      dir="rtl"
+      className="p-4 md:p-6 lg:p-8"
+    >
+      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <Link
+            href={`/clients/${client.id}`}
+            className="text-sm font-bold text-[#123b69] hover:underline"
+          >
+            ← رجوع للعميل
+          </Link>
 
-        <p className="text-slate-500 mt-2">
-          تفاصيل العميل
-        </p>
+          <h1 className="mt-3 text-3xl font-black text-[#102f55]">
+            كشف حساب{" "}
+            {client.name}
+          </h1>
+
+          <p className="mt-2 text-sm text-slate-500">
+            {client.company ||
+              "عميل TrendX"}
+            {client.archivedAt
+              ? " • مؤرشف"
+              : ""}
+          </p>
+        </div>
+
+        <Link
+          href="/finance"
+          className="rounded-xl border bg-white px-4 py-3 text-sm font-bold text-[#17385f]"
+        >
+          المالية
+        </Link>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
-        <div className="bg-white rounded-2xl border p-6">
-          <p className="text-slate-500">
-            الاشتراكات
-          </p>
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+        <Metric
+          label="إجمالي التعاملات"
+          value={formatMoney(
+            totalSalesCents,
+          )}
+        />
 
-          <h3 className="text-3xl font-bold mt-2">
-            {client.subscriptions.length}
-          </h3>
-        </div>
+        <Metric
+          label="إجمالي المدفوع"
+          value={formatMoney(
+            totalPaidCents,
+          )}
+        />
 
-        <div className="bg-white rounded-2xl border p-6">
-          <p className="text-slate-500">
-            المواعيد
-          </p>
-
-          <h3 className="text-3xl font-bold mt-2">
-            {client.appointments.length}
-          </h3>
-        </div>
-
-        <div className="bg-white rounded-2xl border p-6">
-          <p className="text-slate-500">
-            المهام
-          </p>
-
-          <h3 className="text-3xl font-bold mt-2">
-            {client.tasks.length}
-          </h3>
-        </div>
-
-        <div className="bg-white rounded-2xl border p-6">
-          <p className="text-slate-500">
-            المدفوعات
-          </p>
-
-          <h3 className="text-3xl font-bold mt-2 text-green-600">
-            {totalPaid} ج
-          </h3>
-        </div>
+        <Metric
+          label="المستحق الحالي"
+          value={formatMoney(
+            receivablesCents,
+          )}
+        />
       </div>
 
-      <div className="bg-white rounded-2xl border p-6">
-        <h2 className="text-xl font-bold mb-6">
-          بيانات العميل
-        </h2>
+      <section className="mt-8 overflow-hidden rounded-[24px] border border-[#e5ebf2] bg-white">
+        <div className="border-b p-5 md:p-6">
+          <h2 className="text-xl font-black text-[#102f55]">
+            حركة الحساب
+          </h2>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <p className="text-slate-500 text-sm">
-              الاسم
-            </p>
-
-            <p className="font-medium mt-1">
-              {client.name}
-            </p>
-          </div>
-
-          <div>
-            <p className="text-slate-500 text-sm">
-              الهاتف
-            </p>
-
-            <p className="font-medium mt-1">
-              {client.phone || "-"}
-            </p>
-          </div>
-
-          <div>
-            <p className="text-slate-500 text-sm">
-              البريد الإلكتروني
-            </p>
-
-            <p className="font-medium mt-1">
-              {client.email || "-"}
-            </p>
-          </div>
-
-          <div>
-            <p className="text-slate-500 text-sm">
-              الشركة
-            </p>
-
-            <p className="font-medium mt-1">
-              {client.company || "-"}
-            </p>
-          </div>
-
-          <div className="md:col-span-2">
-            <p className="text-slate-500 text-sm">
-              الملاحظات
-            </p>
-
-            <p className="font-medium mt-1">
-              {client.notes || "-"}
-            </p>
-          </div>
+          <p className="mt-1 text-sm text-slate-500">
+            كل الفواتير،
+            الاشتراكات والمدفوعات
+            بترتيب التاريخ
+          </p>
         </div>
+
+        {rows.length === 0 ? (
+          <div className="py-14 text-center text-sm text-slate-400">
+            لا توجد حركة على
+            الحساب حتى الآن
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px]">
+              <thead>
+                <tr className="border-b bg-[#fafbfd] text-xs text-slate-500">
+                  <th className="p-4 text-right">
+                    التاريخ
+                  </th>
+                  <th className="p-4 text-right">
+                    البيان
+                  </th>
+                  <th className="p-4 text-right">
+                    عليه
+                  </th>
+                  <th className="p-4 text-right">
+                    دفع
+                  </th>
+                  <th className="p-4 text-right">
+                    التفاصيل
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {rows.map(
+                  (row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b last:border-0"
+                    >
+                      <td className="p-4 text-sm text-slate-500">
+                        {formatDate(
+                          row.date,
+                        )}
+                      </td>
+
+                      <td className="p-4 font-bold text-[#17385f]">
+                        {
+                          row.description
+                        }
+                      </td>
+
+                      <td className="p-4 font-bold text-amber-600">
+                        {row.type ===
+                        "CHARGE"
+                          ? formatMoney(
+                              row.amountCents,
+                            )
+                          : "—"}
+                      </td>
+
+                      <td className="p-4 font-bold text-emerald-600">
+                        {row.type ===
+                        "PAYMENT"
+                          ? formatMoney(
+                              row.amountCents,
+                            )
+                          : "—"}
+                      </td>
+
+                      <td className="p-4 text-xs text-slate-500">
+                        {row.note ||
+                          "—"}
+                      </td>
+                    </tr>
+                  ),
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <div className="mt-6 rounded-2xl border border-[#f1ddc6] bg-[#fffaf4] p-4 text-sm font-medium text-[#87511d]">
+        المستحق الحالي يُحسب من
+        الأرصدة المتبقية للفواتير
+        والاشتراكات غير الملغاة.
       </div>
+    </div>
+  );
+}
+
+function Metric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="rounded-[22px] border border-[#e5ebf2] bg-white p-5">
+      <p className="text-sm font-bold text-slate-500">
+        {label}
+      </p>
+
+      <p className="mt-3 text-2xl font-black text-[#102f55]">
+        {value}
+      </p>
     </div>
   );
 }
