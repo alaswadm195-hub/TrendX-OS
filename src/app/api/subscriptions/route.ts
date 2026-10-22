@@ -242,6 +242,53 @@ function serializeSubscription<
   };
 }
 
+/**
+ * Effective status is derived for display, not persisted to the database.
+ * Keep the raw `status` field in API responses for backwards compatibility.
+ * Date-only subscriptions expire on the day after their end date in Egypt.
+ */
+type EffectiveSubscriptionStatus =
+  | "CANCELLED"
+  | "COMPLETED"
+  | "EXPIRED"
+  | "ACTIVE";
+
+function egyptDateKey(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Africa/Cairo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const part = (type: "year" | "month" | "day") =>
+    parts.find((item) => item.type === type)?.value;
+
+  const year = part("year");
+  const month = part("month");
+  const day = part("day");
+
+  if (!year || !month || !day) {
+    throw new Error("Unable to resolve the Egyptian calendar date");
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function getEffectiveSubscriptionStatus(
+  subscription: {
+    status: string;
+    completedAt: Date | null;
+    endDate: Date;
+  },
+  todayEgypt: string,
+): EffectiveSubscriptionStatus {
+  if (subscription.status === "CANCELLED") return "CANCELLED";
+  if (subscription.completedAt) return "COMPLETED";
+  if (egyptDateKey(subscription.endDate) < todayEgypt) return "EXPIRED";
+  return "ACTIVE";
+}
+
 export async function GET() {
   try {
     await requireApiAdmin();
@@ -257,13 +304,17 @@ export async function GET() {
         },
       });
 
+    const todayEgypt = egyptDateKey(new Date());
+
     const serializedSubscriptions =
-      subscriptions.map(
-        (subscription) =>
-          serializeSubscription(
-            subscription,
-          ),
-      );
+      subscriptions.map((subscription) => ({
+        ...serializeSubscription(subscription),
+        // Use effectiveStatus in read-only displays. Raw status is preserved.
+        effectiveStatus: getEffectiveSubscriptionStatus(
+          subscription,
+          todayEgypt,
+        ),
+      }));
 
     return NextResponse.json(
       serializedSubscriptions,

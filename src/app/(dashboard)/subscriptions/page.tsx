@@ -215,6 +215,52 @@ function formatDate(
   return `${day}/${month}/${year}`;
 }
 
+/**
+ * Status is a display/business status, not necessarily the raw Prisma status.
+ * Date-only subscriptions expire the day AFTER their end date in Egypt.
+ */
+type EffectiveSubscriptionStatus =
+  | "CANCELLED"
+  | "COMPLETED"
+  | "EXPIRED"
+  | "ACTIVE";
+
+function egyptDateKey(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Africa/Cairo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const getPart = (type: "year" | "month" | "day") =>
+    parts.find((part) => part.type === type)?.value;
+
+  const year = getPart("year");
+  const month = getPart("month");
+  const day = getPart("day");
+
+  if (!year || !month || !day) {
+    throw new Error("Could not resolve subscription calendar date");
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function getEffectiveSubscriptionStatus(
+  subscription: {
+    status: string;
+    completedAt: Date | null;
+    endDate: Date;
+  },
+  todayEgypt: string,
+): EffectiveSubscriptionStatus {
+  if (subscription.status === "CANCELLED") return "CANCELLED";
+  if (subscription.completedAt) return "COMPLETED";
+  if (egyptDateKey(subscription.endDate) < todayEgypt) return "EXPIRED";
+  return "ACTIVE";
+}
+
 export default async function SubscriptionsPage({
   searchParams,
 }: {
@@ -309,6 +355,8 @@ export default async function SubscriptionsPage({
    * the current Float schema and remains safe after Prisma starts returning
    * Decimal values.
    */
+  const todayEgypt = egyptDateKey(new Date());
+
   const subscriptions =
     rawSubscriptions.map(
       (sub) => {
@@ -337,18 +385,11 @@ export default async function SubscriptionsPage({
               paidUntilMonthEndCents,
           );
 
-        /*
-         * Preserve CANCELLED explicitly instead of reclassifying a cancelled
-         * subscription as ACTIVE solely because its endDate is in the future.
-         */
-        const status =
-          sub.status ===
-          "CANCELLED"
-            ? "CANCELLED"
-            : sub.endDate <
-                monthEndExclusive
-              ? "EXPIRED"
-              : "ACTIVE";
+        // Recalculate live status from cancellation, consumption and end date.
+        const status = getEffectiveSubscriptionStatus(
+          sub,
+          todayEgypt,
+        );
 
         return {
           ...sub,
