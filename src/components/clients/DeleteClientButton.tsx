@@ -12,7 +12,7 @@ export default function DeleteClientButton({
 
   async function handleDelete() {
     const confirmed = confirm(
-      "هل أنت متأكد من حذف العميل؟"
+      "هل تريد أرشفة العميل وإخفاءه من القائمة؟ سيتم الاحتفاظ بالفواتير والمدفوعات والبيانات المرتبطة به."
     );
 
     if (!confirmed) return;
@@ -26,13 +26,18 @@ export default function DeleteClientButton({
       );
 
       if (!res.ok) {
-        throw new Error();
+        const data = await res.json().catch(() => null);
+        throw new Error(
+          data?.error || data?.message || `فشل أرشفة العميل (HTTP ${res.status})`
+        );
       }
 
       router.refresh();
     } catch (error) {
       console.error(error);
-      alert("فشل حذف العميل");
+      alert(
+        error instanceof Error ? error.message : "فشل حذف العميل"
+      );
     }
   }
 
