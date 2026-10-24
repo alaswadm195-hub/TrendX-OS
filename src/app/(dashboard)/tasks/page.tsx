@@ -47,6 +47,7 @@ export default async function TasksPage() {
       }) : Promise.resolve([]),
 
       currentUser.role === "ADMIN" ? prisma.client.findMany({
+        where: { archivedAt: null },
         orderBy: {
           name: "asc",
         },
