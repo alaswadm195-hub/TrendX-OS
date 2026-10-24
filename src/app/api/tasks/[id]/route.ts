@@ -99,14 +99,9 @@ export async function PATCH(
       throw new ApiError(404, "Task not found");
     }
 
-    // The sender is the company WhatsApp account itself, so sending
-    // administrative alerts to that same private number is unreliable.
-    // Prefer the already-configured and tested company notifications group.
-    // A separate admin number remains supported if no group is configured.
-    const adminWhatsApp =
-      process.env.ADMIN_WHATSAPP_GROUP_ID?.trim() ||
-      process.env.ADMIN_WHATSAPP_NUMBER?.trim() ||
-      "";
+    // Task workflow admin alerts go only to the private company number.
+    // Appointment group routing is configured separately in its own API.
+    const adminWhatsApp = process.env.ADMIN_WHATSAPP_NUMBER?.trim() || "";
 
     let newStatus = task.status;
     let activity = "";
