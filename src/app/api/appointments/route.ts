@@ -249,6 +249,18 @@ export async function POST(req: Request) {
           });
 
           clientId = newClient.id;
+
+          // Mark clients originally created inside an appointment workflow.
+          // This allows safe cleanup if that appointment is later removed.
+          await tx.auditLog.create({
+            data: {
+              actorUserId: currentUser.userId,
+              action: "CLIENT_CREATE_FROM_APPOINTMENT",
+              entityType: "Client",
+              entityId: newClient.id,
+              metadata: { source: "APPOINTMENT" },
+            },
+          });
         }
       }
 
