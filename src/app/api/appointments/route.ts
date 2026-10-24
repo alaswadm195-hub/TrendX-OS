@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
+import { normalizeClientPhone } from "@/lib/client-phone";
 import { getCurrentUser } from "@/lib/current-user";
 import {
   ApiError,
@@ -222,18 +223,33 @@ export async function POST(req: Request) {
       let clientId = body.clientId || null;
 
       if (body.newClient) {
-        const newClient = await tx.client.create({
-          data: {
-            name: body.newClient.name,
-            phone: body.newClient.phone,
-            notes: body.newClient.notes || null,
-          },
-          select: {
-            id: true,
-          },
+        // "New client" may be a returning customer entered with a
+        // different phone format. Always reuse the active client first.
+        const activeClients = await tx.client.findMany({
+          where: { archivedAt: null, phone: { not: null } },
+          select: { id: true, phone: true },
         });
 
-        clientId = newClient.id;
+        const normalizedPhone = normalizeClientPhone(body.newClient.phone);
+        const match = activeClients.find(
+          (candidate) =>
+            normalizeClientPhone(candidate.phone) === normalizedPhone,
+        );
+
+        if (match) {
+          clientId = match.id;
+        } else {
+          const newClient = await tx.client.create({
+            data: {
+              name: body.newClient.name,
+              phone: body.newClient.phone,
+              notes: body.newClient.notes || null,
+            },
+            select: { id: true },
+          });
+
+          clientId = newClient.id;
+        }
       }
 
       if (!clientId) {
@@ -244,6 +260,7 @@ export async function POST(req: Request) {
         const existingClient = await tx.client.findUnique({
           where: {
             id: clientId,
+            archivedAt: null,
           },
           select: {
             id: true,
