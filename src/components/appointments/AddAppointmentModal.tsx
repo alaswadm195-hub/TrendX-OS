@@ -305,25 +305,22 @@ export default function AddAppointmentModal({
       }
 
       const payload = {
-        ...form,
-
-        /*
-         * IMPORTANT:
-         * datetime-local is treated as Cairo time
-         * and converted to UTC before sending.
-         */
+        title: form.title.trim(),
+        clientId:
+          clientMode === "existing" ? form.clientId || null : null,
+        employeeId: form.employeeId || null,
+        customerName: form.customerName.trim() || null,
+        customerPhone: form.customerPhone.trim() || null,
         appointmentDate,
-
-        whatsappNotificationPhone,
-
+        location: form.location.trim() || null,
+        meetingLink: form.meetingLink.trim() || null,
+        notes: form.notes.trim() || null,
         newClient:
           clientMode === "new"
             ? {
                 name: newClient.name.trim(),
                 phone: newClient.phone.trim(),
-                notes:
-                  newClient.notes.trim() ||
-                  null,
+                notes: newClient.notes.trim() || null,
               }
             : null,
       };
