@@ -62,6 +62,10 @@ export default function AddClientModal() {
         );
       }
 
+      if (res.status === 200) {
+        alert("العميل مسجل بالفعل بنفس رقم الهاتف، وتم استخدام سجله الموجود بدل إنشاء نسخة مكررة.");
+      }
+
       setOpen(false);
 
       setForm({
