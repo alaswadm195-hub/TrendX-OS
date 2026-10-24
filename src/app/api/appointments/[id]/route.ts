@@ -393,18 +393,68 @@ export async function DELETE(
 
     const { id } = await params;
 
-    const deleted = await prisma.appointment.deleteMany({
-      where: {
-        id,
-      },
-    });
+    // Only archive a client automatically if it was created by the
+    // appointment workflow, is now orphaned, and has no other business
+    // records. Existing customers and financial history are never deleted.
+    const result = await prisma.$transaction(async (tx) => {
+      const appointment = await tx.appointment.findUnique({
+        where: { id },
+        select: { id: true, clientId: true },
+      });
 
-    if (deleted.count !== 1) {
-      throw new ApiError(404, "Appointment not found");
-    }
+      if (!appointment) {
+        throw new ApiError(404, "Appointment not found");
+      }
+
+      await tx.appointment.delete({ where: { id } });
+
+      const createdForAppointment = await tx.auditLog.findFirst({
+        where: {
+          action: "CLIENT_CREATE_FROM_APPOINTMENT",
+          entityType: "Client",
+          entityId: appointment.clientId,
+        },
+        select: { id: true },
+      });
+
+      if (!createdForAppointment) {
+        return { archivedOrphanClient: false };
+      }
+
+      const [appointments, invoices, subscriptions, tasks] = await Promise.all([
+        tx.appointment.count({ where: { clientId: appointment.clientId } }),
+        tx.invoice.count({ where: { clientId: appointment.clientId } }),
+        tx.subscription.count({ where: { clientId: appointment.clientId } }),
+        tx.task.count({ where: { clientId: appointment.clientId } }),
+      ]);
+
+      if (appointments + invoices + subscriptions + tasks > 0) {
+        return { archivedOrphanClient: false };
+      }
+
+      const archived = await tx.client.updateMany({
+        where: { id: appointment.clientId, archivedAt: null },
+        data: { archivedAt: new Date() },
+      });
+
+      if (archived.count > 0) {
+        await tx.auditLog.create({
+          data: {
+            actorUserId: currentUser.userId,
+            action: "CLIENT_ARCHIVE_ORPHAN",
+            entityType: "Client",
+            entityId: appointment.clientId,
+            metadata: { deletedAppointmentId: id },
+          },
+        });
+      }
+
+      return { archivedOrphanClient: archived.count > 0 };
+    });
 
     return NextResponse.json({
       success: true,
+      ...result,
     });
   } catch (error) {
     return apiError(error, "Failed to delete appointment");
