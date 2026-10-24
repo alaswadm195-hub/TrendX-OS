@@ -99,7 +99,14 @@ export async function PATCH(
       throw new ApiError(404, "Task not found");
     }
 
-    const adminWhatsApp = process.env.ADMIN_WHATSAPP_NUMBER || "";
+    // The sender is the company WhatsApp account itself, so sending
+    // administrative alerts to that same private number is unreliable.
+    // Prefer the already-configured and tested company notifications group.
+    // A separate admin number remains supported if no group is configured.
+    const adminWhatsApp =
+      process.env.ADMIN_WHATSAPP_GROUP_ID?.trim() ||
+      process.env.ADMIN_WHATSAPP_NUMBER?.trim() ||
+      "";
 
     let newStatus = task.status;
     let activity = "";
@@ -302,7 +309,10 @@ TrendX OS`;
           message: whatsappMessage,
         });
 
-        console.info("WhatsApp task workflow notification sent");
+        console.info(
+          "WhatsApp task workflow notification request accepted",
+          { action, destination: whatsappReceiver.endsWith("@g.us") ? "admin-group" : "phone" },
+        );
       } catch (whatsappError) {
         console.error(
           "WhatsApp task workflow notification failed",
