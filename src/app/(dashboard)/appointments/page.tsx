@@ -33,6 +33,7 @@ export default async function AppointmentsPage() {
       }) : Promise.resolve([]),
 
       currentUser.role === "ADMIN" ? prisma.client.findMany({
+        where: { archivedAt: null },
         orderBy: {
           name: "asc",
         },
