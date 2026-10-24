@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 import { prisma } from "@/lib/prisma";
+import { formatMoney, moneyToCents } from "@/lib/finance";
 import AddClientModal from "@/components/clients/AddClientModal";
 import ClientsTable from "@/components/clients/ClientsTable";
 
@@ -10,11 +11,35 @@ import {
 } from "lucide-react";
 
 export default async function ClientsPage() {
-  const clients = await prisma.client.findMany({
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  // Archived clients remain in the DB for historical financial records.
+  const [clients, invoiceTotals, subscriptionTotals] = await Promise.all([
+    prisma.client.findMany({
+      where: { archivedAt: null },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.invoice.aggregate({
+      where: {
+        client: { is: { archivedAt: null } },
+        status: { not: "CANCELLED" },
+      },
+      _sum: { paidAmount: true, remainingAmount: true },
+    }),
+    prisma.subscription.aggregate({
+      where: {
+        client: { is: { archivedAt: null } },
+        status: { not: "CANCELLED" },
+      },
+      _sum: { paidAmount: true, remainingAmount: true },
+    }),
+  ]);
+
+  const totalPaidCents =
+    moneyToCents(invoiceTotals._sum.paidAmount) +
+    moneyToCents(subscriptionTotals._sum.paidAmount);
+
+  const totalRemainingCents =
+    moneyToCents(invoiceTotals._sum.remainingAmount) +
+    moneyToCents(subscriptionTotals._sum.remainingAmount);
 
   return (
     <div className="p-6 lg:p-8">
@@ -62,7 +87,7 @@ export default async function ClientsPage() {
               </p>
 
               <h3 className="text-3xl font-bold mt-2 text-green-600">
-                0 ج
+                {formatMoney(totalPaidCents)}
               </h3>
             </div>
 
@@ -81,7 +106,7 @@ export default async function ClientsPage() {
               </p>
 
               <h3 className="text-3xl font-bold mt-2 text-orange-500">
-                0 ج
+                {formatMoney(totalRemainingCents)}
               </h3>
             </div>
 
