@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { prisma } from "@/lib/prisma";
+import { normalizeClientPhone } from "@/lib/client-phone";
 import { getCurrentUser } from "@/lib/current-user";
 import { getClientIp } from "@/lib/rate-limit";
 import {
@@ -182,9 +183,29 @@ export async function POST(
      * Personally identifiable client fields such as name, phone, email,
      * and notes are intentionally excluded from audit metadata.
      */
-    const client =
+    const result =
       await prisma.$transaction(
         async (tx) => {
+          // Reuse an existing active client rather than creating another
+          // record when the same phone is entered for a new invoice/client.
+          const activeClients = await tx.client.findMany({
+            where: { archivedAt: null, phone: { not: null } },
+            select: { id: true, phone: true },
+          });
+
+          const normalizedPhone = normalizeClientPhone(body.phone);
+          const match = activeClients.find(
+            (candidate) =>
+              normalizeClientPhone(candidate.phone) === normalizedPhone,
+          );
+
+          if (match) {
+            const existingClient = await tx.client.findUniqueOrThrow({
+              where: { id: match.id },
+            });
+            return { client: existingClient, created: false };
+          }
+
           const createdClient =
             await tx.client.create({
               data: {
@@ -244,14 +265,14 @@ export async function POST(
             },
           });
 
-          return createdClient;
+          return { client: createdClient, created: true };
         },
       );
 
     return NextResponse.json(
-      client,
+      result.client,
       {
-        status: 201,
+        status: result.created ? 201 : 200,
         headers: {
           "Cache-Control":
             "no-store",
