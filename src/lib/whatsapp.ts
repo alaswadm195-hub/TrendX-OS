@@ -3,6 +3,41 @@ type SendWhatsAppOptions = {
   message: string;
 };
 
+/**
+ * Accept Egyptian mobile numbers as entered in the employee form (01...),
+ * while preserving WhatsApp group JIDs and other international numbers.
+ * Baileys requires a country code for individual recipients.
+ */
+function normalizeWhatsAppRecipient(to: string): string {
+  const recipient = to.trim();
+
+  if (/^\d+@g\.us$/.test(recipient)) {
+    return recipient;
+  }
+
+  if (recipient.endsWith("@g.us")) {
+    throw new Error("Invalid WhatsApp group ID");
+  }
+
+  let digits = recipient.replace(/\D/g, "");
+  if (digits.startsWith("00")) {
+    digits = digits.slice(2);
+  }
+
+  // 01012345678 => 201012345678; 1012345678 => 201012345678
+  if (/^01[0125]\d{8}$/.test(digits)) {
+    digits = `20${digits.slice(1)}`;
+  } else if (/^1[0125]\d{8}$/.test(digits)) {
+    digits = `20${digits}`;
+  }
+
+  if (!/^[1-9]\d{7,14}$/.test(digits)) {
+    throw new Error("Invalid WhatsApp phone number");
+  }
+
+  return digits;
+}
+
 export async function sendWhatsAppMessage({
   to,
   message,
@@ -31,6 +66,8 @@ export async function sendWhatsAppMessage({
     );
   }
 
+  const recipient = normalizeWhatsAppRecipient(to);
+
   const response = await fetch(
     `${serviceUrl}/send`,
     {
@@ -44,7 +81,7 @@ export async function sendWhatsAppMessage({
       },
 
       body: JSON.stringify({
-        to,
+        to: recipient,
         message,
       }),
     }
