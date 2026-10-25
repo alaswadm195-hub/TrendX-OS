@@ -475,12 +475,28 @@ export default async function SubscriptionsPage({
   /*
    * إجمالي المتبقي بالنسبة لنهاية الشهر المختار.
    */
+  // Additional service invoices are separate from package face value, but
+  // their unpaid balances are still receivables for the linked package.
+  const activeIds = subscriptions
+    .filter((sub) => sub.status !== "CANCELLED")
+    .map((sub) => sub.id);
+
+  const extraReceivables = activeIds.length > 0
+    ? await prisma.invoice.aggregate({
+        where: {
+          subscriptionId: { in: activeIds },
+          status: { not: "CANCELLED" },
+        },
+        _sum: { remainingAmount: true },
+      })
+    : null;
+
   const totalRemainingCents =
     subscriptions.reduce(
       (sum, sub) =>
         sub.status === "CANCELLED" ? sum : sum + toCents(sub.remainingAmount),
       0,
-    );
+    ) + toCents(extraReceivables?._sum.remainingAmount ?? 0);
 
   const totalRemaining =
     fromCents(
