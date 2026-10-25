@@ -107,6 +107,8 @@ export async function PATCH(
 
                   select: {
                     id: true,
+                    status: true,
+                    serviceCategory: true,
                     includedMinutes:
                       true,
                   },
@@ -134,6 +136,13 @@ export async function PATCH(
               404,
               "Subscription not found",
             );
+          }
+
+          if (subscription.status === "CANCELLED") {
+            throw new ApiError(409, "Cannot change cancelled package hours");
+          }
+          if (subscription.serviceCategory !== "SCREEN_PACKAGES") {
+            throw new ApiError(400, "Hours only apply to screen packages");
           }
 
           const usedMinutes =
