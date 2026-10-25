@@ -110,6 +110,7 @@ model Subscription {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   payments        Payment[]
+  extraInvoices   Invoice[] @relation("SubscriptionExtras")
   usageSessions   SubscriptionUsage[]
   contentQuotas   SubscriptionContentQuota[]
   contentItems    SubscriptionContentItem[]
@@ -198,6 +199,7 @@ model Payment {
 model Invoice {
   id              String           @id @default(cuid())
   clientId        String?
+  subscriptionId  String?
   customerName    String?
   customerPhone   String?
   title           String
@@ -210,9 +212,11 @@ model Invoice {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   client          Client?          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  subscription    Subscription?    @relation("SubscriptionExtras", fields: [subscriptionId], references: [id], onDelete: Restrict)
   payments        InvoicePayment[]
 
   @@index([clientId])
+  @@index([subscriptionId])
   @@index([status])
   @@index([createdAt])
 }
