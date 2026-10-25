@@ -12,7 +12,7 @@ export default function DeleteSubscriptionButton({
 
   async function handleDelete() {
     const confirmed = confirm(
-      "هل تريد حذف الاشتراك؟"
+      "هل تريد إلغاء قيد الباقة لأنه أُدخل بالخطأ؟ ستُستبعد قيمته ودفعاته وإضافاته من تقارير التشغيل، لكن سيبقى سجل العملية محفوظًا للمراجعة. هذا لا يرد أموالًا للعميل."
     );
 
     if (!confirmed) return;
@@ -25,15 +25,15 @@ export default function DeleteSubscriptionButton({
         }
       );
 
+      const result = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error();
+        throw new Error(result?.error || result?.message || "تعذر إلغاء الباقة");
       }
-
       router.refresh();
     } catch (error) {
       console.error(error);
 
-      alert("حدث خطأ أثناء الحذف");
+      alert(error instanceof Error ? error.message : "حدث خطأ أثناء الحذف");
     }
   }
 
