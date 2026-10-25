@@ -466,6 +466,13 @@ export async function PUT(
                 );
               }
 
+              if (existingSubscription.status === "CANCELLED") {
+                throw new ApiError(409, "Cancelled packages cannot be edited");
+              }
+              if (body.status === "CANCELLED") {
+                throw new ApiError(409, "Use the cancel action to void package money and extras");
+              }
+
               if (!client) {
                 throw new ApiError(
                   400,
