@@ -413,13 +413,10 @@ export async function POST(
         body.endDate,
       );
 
-    const endDate =
-      isScreenPackage ||
-      isPageManagement
-        ? addOneCalendarMonth(
-            startDate,
-          )
-        : requestedEndDate;
+    const endDate = requestedEndDate;
+    if (endDate <= startDate) {
+      throw new ApiError(400, "End date must be after start date");
+    }
 
     const ipAddress =
       truncateOptional(
