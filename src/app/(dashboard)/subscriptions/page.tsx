@@ -336,6 +336,7 @@ export default async function SubscriptionsPage({
 
     prisma.payment.findMany({
       where: {
+        subscription: { status: { not: "CANCELLED" } },
         paymentDate: {
           gte: monthStart,
           lt: monthEndExclusive,
@@ -464,10 +465,7 @@ export default async function SubscriptionsPage({
   const totalRemainingCents =
     subscriptions.reduce(
       (sum, sub) =>
-        sum +
-        toCents(
-          sub.remainingAmount,
-        ),
+        sub.status === "CANCELLED" ? sum : sum + toCents(sub.remainingAmount),
       0,
     );
 
