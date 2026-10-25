@@ -939,6 +939,7 @@ export async function DELETE(
             usageSessionsCount,
             contentItemsCount,
             contentQuotasCount,
+            extrasCount,
           ] =
             await Promise.all([
               tx.payment.count({
@@ -968,18 +969,32 @@ export async function DELETE(
                   subscriptionId: id,
                 },
               }),
+
+              tx.invoice.count({
+                where: { subscriptionId: id },
+              }),
             ]);
 
           const hasHistory =
             paymentsCount > 0 ||
             usageSessionsCount > 0 ||
-            contentItemsCount > 0;
+            contentItemsCount > 0 ||
+            extrasCount > 0;
 
           if (hasHistory) {
             if (
               subscription.status !==
               "CANCELLED"
             ) {
+              // Extra-service invoices belong to this package. Mark
+              // them void too, preserving their payment and audit history.
+              await tx.invoice.updateMany({
+                where: {
+                  subscriptionId: id,
+                  status: { not: "CANCELLED" },
+                },
+                data: { status: "CANCELLED" },
+              });
               await tx.subscription.update(
                 {
                   where: {
@@ -1045,6 +1060,7 @@ export async function DELETE(
                     usageSessionsCount,
                     contentItemsCount,
                     contentQuotasCount,
+                    extrasCount,
 
                     preservedHistory:
                       true,
