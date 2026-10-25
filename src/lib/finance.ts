@@ -203,6 +203,7 @@ export async function getFinanceSnapshot(
     prisma.invoicePayment.aggregate(
       {
         where: {
+          invoice: { status: { not: "CANCELLED" } },
           ...dateWhere(
             "paymentDate",
             range,
@@ -216,6 +217,7 @@ export async function getFinanceSnapshot(
 
     prisma.payment.aggregate({
       where: {
+          subscription: { status: { not: "CANCELLED" } },
         ...dateWhere(
           "paymentDate",
           range,
@@ -380,6 +382,7 @@ export async function getRecentTreasuryMovements(
     prisma.invoicePayment.findMany(
       {
         take: fetchCount,
+        where: { invoice: { status: { not: "CANCELLED" } } },
         orderBy: {
           paymentDate:
             "desc",
@@ -411,6 +414,7 @@ export async function getRecentTreasuryMovements(
 
     prisma.payment.findMany({
       take: fetchCount,
+        where: { subscription: { status: { not: "CANCELLED" } } },
       orderBy: {
         paymentDate:
           "desc",
@@ -556,6 +560,7 @@ export async function getPaymentMethodBreakdown(
     prisma.invoicePayment.groupBy({
       by: ["paymentMethod"],
       where: {
+        invoice: { status: { not: "CANCELLED" } },
         ...dateWhere(
           "paymentDate",
           range,
@@ -569,6 +574,7 @@ export async function getPaymentMethodBreakdown(
     prisma.payment.groupBy({
       by: ["paymentMethod"],
       where: {
+        subscription: { status: { not: "CANCELLED" } },
         ...dateWhere(
           "paymentDate",
           range,
