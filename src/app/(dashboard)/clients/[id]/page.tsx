@@ -184,6 +184,9 @@ export default async function ClientStatementPage({
       });
     }
 
+    // Void payments remain on the subscription's audit history, not
+    // in the active customer ledger or receivable totals.
+    if (subscription.status !== "CANCELLED") {
     for (const payment of
       subscription.payments) {
       const amountCents =
@@ -212,6 +215,7 @@ export default async function ClientStatementPage({
             : ""
         }`,
       });
+    }
     }
   }
 
@@ -244,6 +248,7 @@ export default async function ClientStatementPage({
       });
     }
 
+    if (invoice.status !== "CANCELLED") {
     for (const payment of
       invoice.payments) {
       const amountCents =
@@ -272,6 +277,7 @@ export default async function ClientStatementPage({
             : ""
         }`,
       });
+    }
     }
   }
 
