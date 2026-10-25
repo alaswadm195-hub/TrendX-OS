@@ -616,15 +616,10 @@ export async function PUT(
                   body.endDate,
                 );
 
-              const endDate =
-                finalCategory ===
-                  "SCREEN_PACKAGES" ||
-                finalCategory ===
-                  "PAGE_MANAGEMENT"
-                  ? addOneCalendarMonth(
-                      startDate,
-                    )
-                  : requestedEndDate;
+              const endDate = requestedEndDate;
+              if (endDate <= startDate) {
+                throw new ApiError(400, "End date must be after start date");
+              }
 
               const updated =
                 await tx.subscription.update(
