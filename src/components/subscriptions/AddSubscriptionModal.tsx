@@ -217,10 +217,6 @@ export default function AddSubscriptionModal() {
     form.serviceCategory ===
     "PAGE_MANAGEMENT";
 
-  const isMonthlyPackage =
-    isScreenPackage ||
-    isPageManagement;
-
   function closeModal() {
     if (loading) return;
 
@@ -259,12 +255,7 @@ export default function AddSubscriptionModal() {
           0,
       );
 
-    const duration =
-      isMonthlyPackage
-        ? 1
-        : Number(
-            form.duration,
-          );
+    const duration = Number(form.duration);
 
     const includedHours =
       Number(
@@ -410,13 +401,18 @@ export default function AddSubscriptionModal() {
         );
       }
 
-      const endDate =
-        new Date(startDate);
-
-      endDate.setMonth(
-        endDate.getMonth() +
-          duration,
-      );
+      // Move to day 1 first, then clamp at month end, so
+      // e.g. January 31 + one month ends in February.
+      const endDate = new Date(startDate);
+      const originalDay = endDate.getDate();
+      endDate.setDate(1);
+      endDate.setMonth(endDate.getMonth() + duration);
+      const lastDay = new Date(
+        endDate.getFullYear(),
+        endDate.getMonth() + 1,
+        0,
+      ).getDate();
+      endDate.setDate(Math.min(originalDay, lastDay));
 
       const res =
         await fetch(
@@ -786,12 +782,7 @@ export default function AddSubscriptionModal() {
                     المدة
                   </span>
 
-                  {isMonthlyPackage ? (
-                    <div className="rounded-xl border border-[#f1ddc6] bg-[#fffaf4] p-3 text-sm font-bold text-[#87511d]">
-                      شهر واحد — ثابت لهذه الباقة
-                    </div>
-                  ) : (
-                    <select
+                  <select
                       value={
                         form.duration
                       }
@@ -820,7 +811,6 @@ export default function AddSubscriptionModal() {
                         سنة
                       </option>
                     </select>
-                  )}
                 </label>
               </div>
 
