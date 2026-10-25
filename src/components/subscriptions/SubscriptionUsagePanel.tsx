@@ -125,6 +125,8 @@ export default function SubscriptionUsagePanel({
     setSetupMinutes,
   ] = useState("0");
 
+  const [editingLimit, setEditingLimit] = useState(false);
+
   const [date, setDate] =
     useState(
       todayValue(),
@@ -330,6 +332,7 @@ export default function SubscriptionUsagePanel({
         );
       }
 
+      setEditingLimit(false);
       router.refresh();
     } catch (err) {
       setError(
@@ -713,6 +716,59 @@ export default function SubscriptionUsagePanel({
           )}
         />
       </div>
+
+      <p className="mt-3 text-xs text-slate-500">
+        إجمالي ساعات الباقة ثابت كما تم تسجيله؛ الذي يتغيّر مع جلسات التصوير
+        هو المستخدم والمتبقي فقط.
+      </p>
+
+      {status !== "CANCELLED" && (
+        <div className="mt-4">
+          <button type="button"
+            className="text-sm font-bold text-blue-700 underline"
+            onClick={() => {
+              if (!editingLimit) {
+                setSetupHours(String(Math.floor(includedMinutes / 60)));
+                setSetupMinutes(String(includedMinutes % 60));
+              }
+              setEditingLimit(!editingLimit);
+            }}>
+            {editingLimit ? "إغلاق تصحيح الساعات" : "تصحيح إجمالي ساعات الباقة"}
+          </button>
+          {editingLimit && (
+            <form onSubmit={enableTracking} className="mt-3 rounded-xl border bg-slate-50 p-4">
+              <p className="mb-3 text-xs text-slate-600">
+                تعديل رصيد الباقة الكلي لا يمسح جلسات التصوير المسجلة،
+                ولا يمكن تقليل الرصيد عن الساعات المستخدمة بالفعل.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="space-y-2 text-sm">
+                  <span>الساعات</span>
+                  <input type="number" min="0" step="1" className="w-full rounded-xl border p-3"
+                    value={setupHours}
+                    onChange={(e) => setSetupHours(e.target.value)}/>
+                </label>
+                <label className="space-y-2 text-sm">
+                  <span>الدقائق</span>
+                  <select className="w-full rounded-xl border p-3"
+                    value={setupMinutes}
+                    onChange={(e) => setSetupMinutes(e.target.value)}>
+                    <option value="0">0</option>
+                    <option value="15">15</option>
+                    <option value="30">30</option>
+                    <option value="45">45</option>
+                  </select>
+                </label>
+              </div>
+              {error && <p role="alert" className="mt-2 text-sm text-red-600">{error}</p>}
+              <button type="submit" disabled={loading}
+                className="mt-3 rounded-xl bg-[#123b69] px-5 py-3 text-sm font-bold text-white disabled:opacity-50">
+                {loading ? "جاري الحفظ..." : "حفظ تصحيح الساعات"}
+              </button>
+            </form>
+          )}
+        </div>
+      )}
 
       <div className="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
         <div
