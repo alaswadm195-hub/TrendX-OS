@@ -295,6 +295,7 @@ export default async function SubscriptionsPage({
     totalClients,
     rawSubscriptions,
     monthlyPayments,
+    monthlyExtrasPayments,
   ] = await Promise.all([
     prisma.client.count(),
 
@@ -346,6 +347,22 @@ export default async function SubscriptionsPage({
       select: {
         amount: true,
       },
+    }),
+
+    // Extra services linked to a package are invoiced separately. Their
+    // payments count in package monthly income exactly once.
+    prisma.invoicePayment.findMany({
+      where: {
+        invoice: {
+          subscriptionId: { not: null },
+          status: { not: "CANCELLED" },
+        },
+        paymentDate: {
+          gte: monthStart,
+          lt: monthEndExclusive,
+        },
+      },
+      select: { amount: true },
     }),
   ]);
 
@@ -445,12 +462,8 @@ export default async function SubscriptionsPage({
    * إجمالي المدفوعات التي تمت داخل الشهر المختار فقط.
    */
   const totalMonthlyIncomeCents =
-    monthlyPayments.reduce(
-      (sum, payment) =>
-        sum +
-        toCents(
-          payment.amount,
-        ),
+    [...monthlyPayments, ...monthlyExtrasPayments].reduce(
+      (sum, payment) => sum + toCents(payment.amount),
       0,
     );
 
