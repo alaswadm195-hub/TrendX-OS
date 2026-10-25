@@ -55,6 +55,31 @@ export default function SubscriptionExtrasPanel({
   const sum = (field: "totalAmount" | "paidAmount" | "remainingAmount") =>
     visibleInvoices.reduce((total, invoice) => total + invoice[field], 0);
 
+  async function voidExtra(extraId: string) {
+    if (cancelled || saving) return;
+    const confirmed = confirm(
+      "إلغاء قيد الإضافة لأنه أُدخل بالخطأ؟ سيتم استبعاده من الحسابات مع الاحتفاظ بسجل التدقيق. هذا لا ينفّذ ردًّا نقديًا."
+    );
+    if (!confirmed) return;
+    try {
+      setSaving(true);
+      setError("");
+      const response = await fetch(
+        `/api/subscriptions/${subscriptionId}/extras/${extraId}`,
+        { method: "DELETE" },
+      );
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error || data?.message || "فشل إلغاء الإضافة");
+      }
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "فشل إلغاء الإضافة");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function addExtra(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving || cancelled) return;
@@ -174,6 +199,8 @@ export default function SubscriptionExtrasPanel({
         </form>
       )}
 
+      {error && <p role="alert" className="mb-4 text-sm text-red-600">{error}</p>}
+
       {invoices.length === 0 ? (
         <p className="py-4 text-center text-slate-500">مفيش خدمات إضافية على الباقة لسه.</p>
       ) : (
@@ -185,6 +212,7 @@ export default function SubscriptionExtrasPanel({
               <th className="p-3 text-right">المدفوع</th>
               <th className="p-3 text-right">المتبقي</th>
               <th className="p-3 text-right">الفاتورة</th>
+              <th className="p-3 text-right">تصحيح خطأ</th>
             </tr></thead>
             <tbody>{invoices.map((invoice) => (
               <tr key={invoice.id} className="border-b">
@@ -198,6 +226,15 @@ export default function SubscriptionExtrasPanel({
                 <td className="p-3">{currency(invoice.remainingAmount)}</td>
                 <td className="p-3">
                   <a href={`/finance/invoices/${invoice.id}`} className="font-semibold text-blue-600 underline">التفاصيل</a>
+                </td>
+                <td className="p-3">
+                  {!cancelled && invoice.status !== "CANCELLED" && (
+                    <button type="button" disabled={saving}
+                      onClick={() => voidExtra(invoice.id)}
+                      className="text-red-600 underline disabled:opacity-50">
+                      إلغاء قيد خاطئ
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}</tbody>
