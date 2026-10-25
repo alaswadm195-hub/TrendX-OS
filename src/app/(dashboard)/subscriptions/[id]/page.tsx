@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import AddPaymentModal from "@/components/subscriptions/AddPaymentModal";
 import SubscriptionUsagePanel from "@/components/subscriptions/SubscriptionUsagePanel";
+import SubscriptionExtrasPanel from "@/components/subscriptions/SubscriptionExtrasPanel";
 import SubscriptionContentPanel from "@/components/subscriptions/SubscriptionContentPanel";
 
 import { prisma } from "@/lib/prisma";
@@ -120,6 +121,20 @@ export default async function SubscriptionDetailsPage({
             },
           },
 
+          extraInvoices: {
+            select: {
+              id: true,
+              title: true,
+              description: true,
+              totalAmount: true,
+              paidAmount: true,
+              remainingAmount: true,
+              status: true,
+              createdAt: true,
+            },
+            orderBy: { createdAt: "desc" },
+          },
+
           payments: {
             select: {
               id: true,
@@ -208,6 +223,14 @@ export default async function SubscriptionDetailsPage({
       moneyToNumber(
         rawSubscription.remainingAmount,
       ),
+
+    extraInvoices: rawSubscription.extraInvoices.map((invoice) => ({
+      ...invoice,
+      totalAmount: moneyToNumber(invoice.totalAmount),
+      paidAmount: moneyToNumber(invoice.paidAmount),
+      remainingAmount: moneyToNumber(invoice.remainingAmount),
+      createdAt: invoice.createdAt.toISOString(),
+    })),
 
     payments:
       rawSubscription.payments.map(
@@ -517,6 +540,13 @@ export default async function SubscriptionDetailsPage({
           />
         ) : null}
       </div>
+
+      <SubscriptionExtrasPanel
+        subscriptionId={subscription.id}
+        planName={subscription.planName}
+        cancelled={trackingStatus === "CANCELLED"}
+        invoices={subscription.extraInvoices}
+      />
 
       <div className="rounded-[24px] border border-[#e5ebf2] bg-white p-6">
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
