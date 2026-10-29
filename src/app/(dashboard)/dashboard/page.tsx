@@ -601,6 +601,7 @@ export default async function DashboardPage() {
     ] = await Promise.all([
       prisma.payment.findMany({
         where: {
+          subscription: { status: { not: "CANCELLED" } },
           paymentDate: {
             gte:
               revenueRangeStart,
@@ -621,6 +622,7 @@ export default async function DashboardPage() {
       prisma.invoicePayment.findMany(
         {
           where: {
+            invoice: { status: { not: "CANCELLED" } },
             paymentDate: {
               gte:
                 revenueRangeStart,
@@ -641,6 +643,7 @@ export default async function DashboardPage() {
       ),
 
       prisma.payment.aggregate({
+        where: { subscription: { status: { not: "CANCELLED" } } },
         _sum: {
           amount: true,
         },
@@ -648,6 +651,7 @@ export default async function DashboardPage() {
 
       prisma.invoicePayment.aggregate(
         {
+          where: { invoice: { status: { not: "CANCELLED" } } },
           _sum: {
             amount: true,
           },
