@@ -53,6 +53,12 @@ const statusStyle: Record<EffectiveStatus, { label: string; className: string }>
   },
 };
 
+function displayFinancialAmount(subscription: Subscription, amount: number) {
+  return subscription.status === "CANCELLED"
+    ? <span className="text-xs text-slate-400" title="محفوظ للمراجعة فقط">مستبعد ماليًا</span>
+    : <>{amount} ج</>;
+}
+
 function statusInfo(status: string) {
   return statusStyle[status as EffectiveStatus] ?? {
     label: status || "غير محددة",
@@ -226,15 +232,15 @@ export default function SubscriptionsTable({
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <p className="text-slate-500">الإجمالي</p>
-                <p className="font-semibold mt-1">{subscription.totalAmount} ج</p>
+                <p className="font-semibold mt-1">{displayFinancialAmount(subscription, subscription.totalAmount)}</p>
               </div>
               <div>
                 <p className="text-slate-500">المدفوع</p>
-                <p className="font-semibold text-green-600 mt-1">{subscription.paidAmount} ج</p>
+                <p className="font-semibold text-green-600 mt-1">{displayFinancialAmount(subscription, subscription.paidAmount)}</p>
               </div>
               <div>
                 <p className="text-slate-500">المتبقي</p>
-                <p className="font-semibold text-orange-500 mt-1">{subscription.remainingAmount} ج</p>
+                <p className="font-semibold text-orange-500 mt-1">{displayFinancialAmount(subscription, subscription.remainingAmount)}</p>
               </div>
               <div>
                 <p className="text-slate-500">النهاية</p>
@@ -285,9 +291,9 @@ export default function SubscriptionsTable({
               <tr key={subscription.id} className="border-b hover:bg-slate-50">
                 <td className="p-4 font-medium">{subscription.client?.name || "-"}</td>
                 <td className="p-4">{subscription.planName}</td>
-                <td className="p-4">{subscription.totalAmount} ج</td>
-                <td className="p-4 text-green-600">{subscription.paidAmount} ج</td>
-                <td className="p-4 text-orange-500">{subscription.remainingAmount} ج</td>
+                <td className="p-4">{displayFinancialAmount(subscription, subscription.totalAmount)}</td>
+                <td className="p-4 text-green-600">{displayFinancialAmount(subscription, subscription.paidAmount)}</td>
+                <td className="p-4 text-orange-500">{displayFinancialAmount(subscription, subscription.remainingAmount)}</td>
                 <td className="p-4">{formatDate(subscription.startDate)}</td>
                 <td className="p-4">{formatDate(subscription.endDate)}</td>
                 <td className="p-4 max-w-xs">
