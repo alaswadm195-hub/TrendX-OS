@@ -297,7 +297,7 @@ export default async function SubscriptionsPage({
     monthlyPayments,
     monthlyExtrasPayments,
   ] = await Promise.all([
-    prisma.client.count(),
+    prisma.client.count({ where: { archivedAt: null } }),
 
     prisma.subscription.findMany({
       where: {
