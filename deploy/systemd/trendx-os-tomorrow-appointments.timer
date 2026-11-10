@@ -3,7 +3,7 @@ Description=TrendX OS - WhatsApp summary of tomorrow's appointments at 02:00 Cai
 
 [Timer]
 OnCalendar=*-*-* 02:00:00 Africa/Cairo
-Persistent=true
+Persistent=false
 AccuracySec=1min
 Unit=trendx-os-tomorrow-appointments.service
 
