@@ -329,13 +329,9 @@ export async function POST(req: Request) {
      * Notification failure must never roll back a valid appointment.
      */
     try {
-      const whatsappGroup = process.env.ADMIN_WHATSAPP_GROUP_ID;
-      const adminNumber = process.env.ADMIN_WHATSAPP_NUMBER;
-
-      const whatsappReceiver =
-        whatsappGroup ||
-        adminNumber ||
-        "";
+      // Appointment notifications belong to the bookings group only.
+      // Never fall back to the private admin number (reserved for tasks).
+      const whatsappReceiver = process.env.ADMIN_WHATSAPP_GROUP_ID?.trim() || "";
 
       if (!whatsappReceiver) {
         console.info(
