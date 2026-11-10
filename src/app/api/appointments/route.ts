@@ -11,6 +11,7 @@ import {
   safeUserSelect,
 } from "@/lib/api-security";
 import { sendWhatsAppMessage } from "@/lib/whatsapp";
+import { newAppointmentWhatsAppMessage } from "@/lib/appointment-whatsapp";
 
 const nullableText = (max: number) =>
   z.string().trim().max(max).optional().nullable();
@@ -341,87 +342,7 @@ export async function POST(req: Request) {
           "Appointment WhatsApp notification skipped: no receiver configured",
         );
       } else {
-        const appointmentDate = new Date(
-          appointment.appointmentDate,
-        );
-
-        const formattedDate =
-          appointmentDate.toLocaleDateString(
-            "ar-EG",
-            {
-              timeZone: "Africa/Cairo",
-              year: "numeric",
-              month: "2-digit",
-              day: "2-digit",
-            },
-          );
-
-        const formattedTime =
-          appointmentDate.toLocaleTimeString(
-            "ar-EG",
-            {
-              timeZone: "Africa/Cairo",
-              hour: "2-digit",
-              minute: "2-digit",
-            },
-          );
-
-        const employeeName =
-          appointment.employee?.user?.name ||
-          "لم يتم تحديد موظف";
-
-        const location =
-          appointment.location ||
-          "غير محدد";
-
-        const meetingLink =
-          appointment.meetingLink ||
-          "";
-
-        const notes =
-          appointment.notes ||
-          "";
-
-        const whatsappMessage = `📅 موعد جديد
-
-📌 عنوان الموعد:
-${appointment.title}
-
-👤 العميل:
-${appointment.client.name}
-
-📞 رقم العميل:
-${appointment.client.phone || "غير مسجل"}
-
-👨‍💼 الموظف:
-${employeeName}
-
-📅 التاريخ:
-${formattedDate}
-
-⏰ الوقت:
-${formattedTime}
-
-📍 المكان:
-${location}
-${
-  meetingLink
-    ? `
-
-🔗 رابط الاجتماع:
-${meetingLink}`
-    : ""
-}
-${
-  notes
-    ? `
-
-📝 الملاحظات:
-${notes}`
-    : ""
-}
-
-✅ تم إضافة الموعد إلى TrendX OS بنجاح.`;
+        const whatsappMessage = newAppointmentWhatsAppMessage(appointment);
 
         await sendWhatsAppMessage({
           to: whatsappReceiver,
