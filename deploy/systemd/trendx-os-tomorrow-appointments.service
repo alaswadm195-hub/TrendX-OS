@@ -1,0 +1,19 @@
+[Unit]
+Description=TrendX OS - send tomorrow's appointments to WhatsApp group
+Wants=network-online.target
+After=network-online.target trendx-os.service trendx-whatsapp.service
+
+[Service]
+Type=oneshot
+User=trendxos
+Group=trendxos
+WorkingDirectory=/opt/trendx-os
+Environment=NODE_ENV=production
+Environment=TZ=Africa/Cairo
+RuntimeDirectory=trendx-os-digest
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/flock -n /run/trendx-os-digest/lock /opt/trendx-os/node_modules/.bin/tsx /opt/trendx-os/scripts/send-tomorrow-appointments.ts --send
+TimeoutStartSec=120
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0077
