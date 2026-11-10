@@ -1,0 +1,11 @@
+[Unit]
+Description=TrendX OS - WhatsApp summary of tomorrow's appointments at 02:00 Cairo time
+
+[Timer]
+OnCalendar=*-*-* 02:00:00 Africa/Cairo
+Persistent=true
+AccuracySec=1min
+Unit=trendx-os-tomorrow-appointments.service
+
+[Install]
+WantedBy=timers.target
